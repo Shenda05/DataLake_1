@@ -1,0 +1,32 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: data-lake-platform
+  datasource:
+    url: jdbc:h2:mem:datalake;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  jwt:
+    secret: change-me-for-production-demo-secret-2026
+    expire-seconds: 7200
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+

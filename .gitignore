@@ -1,0 +1,11 @@
+.DS_Store
+node_modules/
+dist/
+.vite/
+*.log
+backend/target/
+backend/.mvn/
+frontend/.idea/
+frontend/.vscode/
+storage/
+

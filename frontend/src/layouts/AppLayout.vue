@@ -1,0 +1,71 @@
+<script setup lang="ts">
+import { computed } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { useAuthStore } from '../stores/auth';
+
+const route = useRoute();
+const router = useRouter();
+const authStore = useAuthStore();
+
+const menuItems = computed(() => [
+  { label: '首页', key: 'dashboard', path: '/dashboard' },
+  { label: '数据源管理', key: 'data-sources', path: '/data-sources' },
+  { label: '数据接入', key: 'imports', path: '/imports' },
+  { label: '数据集管理', key: 'datasets', path: '/datasets' },
+  { label: '查询分析', key: 'queries', path: '/queries' },
+  { label: '数据治理', key: 'governance', path: '/governance' },
+  { label: '任务调度', key: 'tasks', path: '/tasks' },
+  { label: '日志监控', key: 'logs', path: '/logs' },
+  { label: '用户与权限', key: 'users', path: '/users' }
+].filter((item) => authStore.allowedMenus.includes(item.key as never)));
+
+function navigate(path: string) {
+  router.push(path);
+}
+
+function logout() {
+  authStore.logout();
+  router.push('/login');
+}
+</script>
+
+<template>
+  <el-container class="app-shell">
+    <el-aside class="sidebar" width="240px">
+      <div class="brand">
+        <p class="brand-eyebrow">Data Lake</p>
+        <h1>管理平台</h1>
+      </div>
+      <el-menu
+        :default-active="route.path"
+        class="menu"
+        @select="navigate"
+      >
+        <el-menu-item
+          v-for="item in menuItems"
+          :key="item.path"
+          :index="item.path"
+        >
+          {{ item.label }}
+        </el-menu-item>
+      </el-menu>
+    </el-aside>
+    <el-container>
+      <el-header class="topbar">
+        <div>
+          <p class="topbar-title">{{ route.meta.title }}</p>
+          <span class="topbar-subtitle">面向课程项目的可视化数据湖控制台</span>
+        </div>
+        <div class="topbar-user">
+          <span>{{ authStore.profile?.displayName }}</span>
+          <el-tag effect="dark" round>{{ authStore.profile?.role }}</el-tag>
+          <el-button link type="primary" @click="logout">退出</el-button>
+        </div>
+      </el-header>
+      <el-main class="content">
+        <router-view />
+      </el-main>
+    </el-container>
+  </el-container>
+</template>
+
