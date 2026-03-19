@@ -3,6 +3,9 @@ package com.datalake.platform.dataset;
 import com.datalake.platform.common.web.ApiResponse;
 import com.datalake.platform.common.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
+import java.nio.charset.StandardCharsets;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -45,9 +48,25 @@ public class DatasetController {
         @PathVariable Long datasetId,
         @RequestParam(defaultValue = "1") int pageNum,
         @RequestParam(defaultValue = "10") int pageSize,
+        @RequestParam(required = false) String field,
+        @RequestParam(required = false) String keyword,
         HttpServletRequest request
     ) {
-        return ApiResponse.success(datasetService.preview(datasetId, pageNum, pageSize), requestId(request));
+        return ApiResponse.success(datasetService.preview(datasetId, pageNum, pageSize, field, keyword), requestId(request));
+    }
+
+    @GetMapping("/api/datasets/{datasetId}/export")
+    public ResponseEntity<byte[]> export(
+        @PathVariable Long datasetId,
+        @RequestParam(defaultValue = "csv") String format,
+        @RequestParam(required = false) String field,
+        @RequestParam(required = false) String keyword
+    ) {
+        DatasetService.DatasetExport export = datasetService.export(datasetId, format, field, keyword);
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_TYPE, export.contentType())
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + java.net.URLEncoder.encode(export.fileName(), StandardCharsets.UTF_8))
+            .body(export.content());
     }
 
     private String requestId(HttpServletRequest request) {

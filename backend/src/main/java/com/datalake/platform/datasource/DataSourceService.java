@@ -1,5 +1,6 @@
 package com.datalake.platform.datasource;
 
+import com.datalake.platform.common.util.GeneratedKeyUtils;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -63,7 +64,7 @@ public class DataSourceService {
             statement.setTimestamp(12, now());
             return statement;
         }, keyHolder);
-        return get(keyHolder.getKey().longValue());
+        return get(GeneratedKeyUtils.getLongId(keyHolder, "source_id"));
     }
 
     public DataSourceRecord update(Long sourceId, DataSourceController.UpsertDataSourceRequest body) {

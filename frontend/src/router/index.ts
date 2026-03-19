@@ -12,6 +12,18 @@ import LogsView from '../views/LogsView.vue';
 import UsersView from '../views/UsersView.vue';
 import { useAuthStore } from '../stores/auth';
 
+const menuRouteMap: Record<string, string> = {
+  dashboard: 'dashboard',
+  'data-sources': 'data-sources',
+  imports: 'imports',
+  datasets: 'datasets',
+  queries: 'queries',
+  governance: 'governance',
+  tasks: 'tasks',
+  logs: 'logs',
+  users: 'users'
+};
+
 const routes = [
   { path: '/login', name: 'login', component: LoginView, meta: { title: '登录' } },
   {
@@ -46,14 +58,20 @@ router.beforeEach((to) => {
   if (to.meta.requiresAuth && !authStore.isLoggedIn) {
     return { name: 'login' };
   }
+  if (authStore.isLoggedIn && authStore.allowedMenus.length === 0) {
+    authStore.logout();
+    return { name: 'login' };
+  }
   if (to.meta.menuKey && !authStore.allowedMenus.includes(to.meta.menuKey as never)) {
-    return { name: 'dashboard' };
+    const fallbackMenu = authStore.allowedMenus[0];
+    const fallbackRoute = fallbackMenu ? menuRouteMap[fallbackMenu] : null;
+    return fallbackRoute ? { name: fallbackRoute } : { name: 'login' };
   }
   if (to.name === 'login' && authStore.isLoggedIn) {
-    return { name: 'dashboard' };
+    const fallbackMenu = authStore.allowedMenus[0] || 'dashboard';
+    return { name: menuRouteMap[fallbackMenu] || 'dashboard' };
   }
   return true;
 });
 
 export default router;
-

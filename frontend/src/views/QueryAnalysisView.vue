@@ -1,33 +1,150 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { ElMessage } from 'element-plus';
 import * as echarts from 'echarts';
-import { datasets } from '../mock/api';
+import {
+  filterQuery,
+  getAnalysisCharts,
+  getAnalysisSummary,
+  listDatasets,
+  listMetadata,
+  sqlQuery,
+  type DatasetSummary,
+  type MetaField
+} from '../api/platform';
 
 const chartRef = ref<HTMLDivElement | null>(null);
+const datasets = ref<DatasetSummary[]>([]);
+const metadata = ref<MetaField[]>([]);
+const summary = ref({
+  datasetId: 0,
+  recordCount: 0,
+  nullCount: 0,
+  duplicateCount: 0
+});
+const tableData = ref<Record<string, unknown>[]>([]);
+const chartData = ref<{ name: string; value: number }[]>([]);
+const resultColumns = computed(() => Object.keys(tableData.value[0] || {}));
+const form = reactive({
+  datasetId: undefined as number | undefined,
+  field: '',
+  operator: 'LIKE',
+  value: '',
+  sql: 'SELECT * FROM dataset LIMIT 20'
+});
 let chart: echarts.ECharts | null = null;
 
-const tableData = [
-  { company_name: '示例科技', industry: '智能制造', patent_count: 22 },
-  { company_name: '未来工业', industry: '新能源', patent_count: 14 },
-  { company_name: '启明数据', industry: '人工智能', patent_count: 18 }
-];
-
-onMounted(async () => {
+async function renderChart() {
   await nextTick();
   if (!chartRef.value) return;
-  chart = echarts.init(chartRef.value);
+  if (!chart) {
+    chart = echarts.init(chartRef.value);
+  }
   chart.setOption({
     tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: tableData.map((item) => item.company_name) },
+    xAxis: { type: 'category', data: chartData.value.map((item) => item.name) },
     yAxis: { type: 'value' },
     series: [
       {
         type: 'bar',
-        data: tableData.map((item) => item.patent_count),
+        data: chartData.value.map((item) => item.value),
         itemStyle: { color: '#db6f44' }
       }
     ]
   });
+}
+
+async function loadBaseData() {
+  datasets.value = await listDatasets();
+  if (datasets.value.length > 0 && !form.datasetId) {
+    form.datasetId = datasets.value[0].datasetId;
+  }
+  await loadDatasetAnalysis();
+}
+
+async function loadDatasetAnalysis() {
+  if (!form.datasetId) return;
+  metadata.value = await listMetadata(form.datasetId);
+  form.field = metadata.value[0]?.fieldName || '';
+  summary.value = await getAnalysisSummary(form.datasetId);
+  chartData.value = await getAnalysisCharts(form.datasetId);
+  await renderChart();
+}
+
+async function runFilterQuery() {
+  if (!form.datasetId || !form.field || !form.value) {
+    ElMessage.warning('请选择数据集并填写筛选条件');
+    return;
+  }
+  try {
+    const result = await filterQuery({
+      datasetId: form.datasetId,
+      field: form.field,
+      operator: form.operator,
+      value: form.value,
+      pageNum: 1,
+      pageSize: 20
+    });
+    tableData.value = result.records;
+    await loadDatasetAnalysis();
+  } catch (error) {
+    ElMessage.error(`条件查询失败: ${(error as Error).message}`);
+  }
+}
+
+async function runSqlQuery() {
+  if (!form.datasetId || !form.sql) {
+    ElMessage.warning('请选择数据集并输入 SQL');
+    return;
+  }
+  try {
+    tableData.value = await sqlQuery({
+      datasetId: form.datasetId,
+      sql: form.sql
+    });
+  } catch (error) {
+    ElMessage.error(`SQL 查询失败: ${(error as Error).message}`);
+  }
+}
+
+function exportRows(format: 'csv' | 'json') {
+  if (!tableData.value.length) {
+    ElMessage.warning('当前没有可导出的查询结果');
+    return;
+  }
+  const filename = `query-result.${format}`;
+  let blob: Blob;
+  if (format === 'json') {
+    blob = new Blob([JSON.stringify(tableData.value, null, 2)], { type: 'application/json' });
+  } else {
+    const headers = Object.keys(tableData.value[0]);
+    const rows = tableData.value.map((row) =>
+      headers
+        .map((header) => {
+          const value = row[header] == null ? '' : String(row[header]);
+          const escaped = value.replace(/"/g, '""');
+          return escaped.includes(',') || escaped.includes('"') || escaped.includes('\n') ? `"${escaped}"` : escaped;
+        })
+        .join(',')
+    );
+    blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8' });
+  }
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+onMounted(async () => {
+  try {
+    await loadBaseData();
+  } catch (error) {
+    ElMessage.error(`查询页初始化失败: ${(error as Error).message}`);
+  }
 });
 
 onBeforeUnmount(() => chart?.dispose());
@@ -39,12 +156,12 @@ onBeforeUnmount(() => chart?.dispose());
       <template #header>
         <div class="card-header">
           <span>条件查询与 SQL 查询</span>
-          <el-tag type="warning">Week 5</el-tag>
+          <el-tag type="success">Real Query</el-tag>
         </div>
       </template>
       <el-form inline>
         <el-form-item label="数据集">
-          <el-select placeholder="请选择数据集">
+          <el-select v-model="form.datasetId" placeholder="请选择数据集" @change="loadDatasetAnalysis">
             <el-option
               v-for="dataset in datasets"
               :key="dataset.datasetId"
@@ -54,34 +171,74 @@ onBeforeUnmount(() => chart?.dispose());
           </el-select>
         </el-form-item>
         <el-form-item label="字段">
-          <el-input placeholder="例如 industry" />
+          <el-select v-model="form.field" placeholder="请选择字段">
+            <el-option
+              v-for="column in metadata"
+              :key="column.fieldId"
+              :label="column.fieldName"
+              :value="column.fieldName"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="操作符">
+          <el-select v-model="form.operator">
+            <el-option label="LIKE" value="LIKE" />
+            <el-option label="EQ" value="EQ" />
+            <el-option label="GT" value="GT" />
+            <el-option label="LT" value="LT" />
+          </el-select>
         </el-form-item>
         <el-form-item label="条件值">
-          <el-input placeholder="例如 智能制造" />
+          <el-input v-model="form.value" placeholder="例如 智能制造" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary">执行查询</el-button>
+          <el-button type="primary" @click="runFilterQuery">执行条件查询</el-button>
         </el-form-item>
       </el-form>
       <el-input
+        v-model="form.sql"
         type="textarea"
         :rows="4"
-        placeholder="SELECT company_name, patent_count FROM patent_dataset WHERE patent_count > 10 ORDER BY patent_count DESC"
+        placeholder="SELECT * FROM dataset LIMIT 20"
       />
+      <div class="action-row">
+        <el-button type="primary" plain @click="runSqlQuery">执行 SQL 查询</el-button>
+      </div>
     </el-card>
+
+    <section class="stat-grid">
+      <el-card shadow="hover">
+        <p class="stat-label">记录数</p>
+        <p class="stat-value">{{ summary.recordCount }}</p>
+      </el-card>
+      <el-card shadow="hover">
+        <p class="stat-label">空值数</p>
+        <p class="stat-value">{{ summary.nullCount }}</p>
+      </el-card>
+      <el-card shadow="hover">
+        <p class="stat-label">重复行数</p>
+        <p class="stat-value">{{ summary.duplicateCount }}</p>
+      </el-card>
+    </section>
 
     <section class="two-column-grid">
       <el-card shadow="never">
         <template #header>
           <div class="card-header">
             <span>查询结果</span>
-            <el-button link type="primary">导出 CSV/JSON</el-button>
+            <div>
+              <el-button link type="primary" @click="exportRows('csv')">导出 CSV</el-button>
+              <el-button link type="primary" @click="exportRows('json')">导出 JSON</el-button>
+            </div>
           </div>
         </template>
         <el-table :data="tableData" stripe>
-          <el-table-column prop="company_name" label="企业名称" />
-          <el-table-column prop="industry" label="行业" />
-          <el-table-column prop="patent_count" label="专利数量" />
+          <el-table-column
+            v-for="column in resultColumns"
+            :key="column"
+            :prop="column"
+            :label="column"
+          />
         </el-table>
       </el-card>
       <el-card shadow="never">
@@ -96,4 +253,3 @@ onBeforeUnmount(() => chart?.dispose());
     </section>
   </div>
 </template>
-

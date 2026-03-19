@@ -59,3 +59,16 @@ export async function apiUpload<T>(url: string, formData: FormData) {
   });
   return response.data.data;
 }
+
+export async function apiDownload(url: string, params?: Record<string, unknown>) {
+  const response = await client.get(url, {
+    params,
+    responseType: 'blob'
+  });
+  const disposition = response.headers['content-disposition'] as string | undefined;
+  const filename = disposition?.match(/filename\*=UTF-8''([^;]+)/)?.[1];
+  return {
+    blob: response.data as Blob,
+    filename: filename ? decodeURIComponent(filename) : undefined
+  };
+}

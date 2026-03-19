@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, apiPut, apiUpload } from './client';
+import { apiDelete, apiDownload, apiGet, apiPost, apiPut, apiUpload } from './client';
 
 export type LoginResult = {
   token: string;
@@ -142,4 +142,40 @@ export function listMetadata(datasetId: number) {
 
 export function previewDataset(datasetId: number, pageNum = 1, pageSize = 10) {
   return apiGet<PageResponse<Record<string, unknown>>>(`/preview/${datasetId}`, { pageNum, pageSize });
+}
+
+export function previewDatasetWithFilter(datasetId: number, pageNum = 1, pageSize = 10, field?: string, keyword?: string) {
+  return apiGet<PageResponse<Record<string, unknown>>>(`/preview/${datasetId}`, { pageNum, pageSize, field, keyword });
+}
+
+export function exportDataset(datasetId: number, format: 'csv' | 'json', field?: string, keyword?: string) {
+  return apiDownload(`/datasets/${datasetId}/export`, { format, field, keyword });
+}
+
+export function filterQuery(payload: {
+  datasetId: number;
+  field: string;
+  operator: string;
+  value: string;
+  pageNum?: number;
+  pageSize?: number;
+}) {
+  return apiPost<PageResponse<Record<string, unknown>>>('/queries/filter', payload);
+}
+
+export function sqlQuery(payload: { datasetId: number; sql: string }) {
+  return apiPost<Record<string, unknown>[]>('/queries/sql', payload);
+}
+
+export function getAnalysisSummary(datasetId: number) {
+  return apiGet<{
+    datasetId: number;
+    recordCount: number;
+    nullCount: number;
+    duplicateCount: number;
+  }>(`/analysis/${datasetId}/summary`);
+}
+
+export function getAnalysisCharts(datasetId: number) {
+  return apiGet<{ name: string; value: number }[]>(`/analysis/${datasetId}/charts`);
 }

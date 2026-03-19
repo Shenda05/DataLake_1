@@ -1,8 +1,11 @@
 package com.datalake.platform.dataset;
 
+import com.datalake.platform.common.util.GeneratedKeyUtils;
 import com.datalake.platform.common.util.SqlNameUtils;
 import com.datalake.platform.common.web.PageResponse;
 import com.datalake.platform.datasource.FileParserService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -19,10 +22,12 @@ public class DatasetService {
 
     private final JdbcTemplate jdbcTemplate;
     private final DatasetTableService datasetTableService;
+    private final ObjectMapper objectMapper;
 
-    public DatasetService(JdbcTemplate jdbcTemplate, DatasetTableService datasetTableService) {
+    public DatasetService(JdbcTemplate jdbcTemplate, DatasetTableService datasetTableService, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
         this.datasetTableService = datasetTableService;
+        this.objectMapper = objectMapper;
     }
 
     public CreatedDataset createImportedDataset(
@@ -83,7 +88,7 @@ public class DatasetService {
             statement.setTimestamp(12, now());
             return statement;
         }, keyHolder);
-        Long datasetId = keyHolder.getKey().longValue();
+        Long datasetId = GeneratedKeyUtils.getLongId(keyHolder, "dataset_id");
         String physicalTableName = SqlNameUtils.sanitizeTableName("dl_dataset_" + datasetId);
         jdbcTemplate.update("update data_set set physical_table_name = ?, update_time = ? where dataset_id = ?", physicalTableName, now(), datasetId);
         List<MetaFieldRecord> persistedColumns = insertMetaFields(datasetId, columns);
@@ -167,9 +172,21 @@ public class DatasetService {
         );
     }
 
-    public PageResponse<Map<String, Object>> preview(Long datasetId, int pageNum, int pageSize) {
+    public PageResponse<Map<String, Object>> preview(Long datasetId, int pageNum, int pageSize, String field, String keyword) {
         DatasetDetail detail = detail(datasetId);
-        return datasetTableService.preview(detail.physicalTableName(), metadata(datasetId), pageNum, pageSize);
+        return datasetTableService.preview(detail.physicalTableName(), metadata(datasetId), pageNum, pageSize, field, keyword);
+    }
+
+    public DatasetExport export(Long datasetId, String format, String field, String keyword) {
+        DatasetDetail detail = detail(datasetId);
+        List<MetaFieldRecord> columns = metadata(datasetId);
+        List<Map<String, Object>> rows = datasetTableService.fetchAll(detail.physicalTableName(), columns, field, keyword);
+        String normalizedFormat = format == null ? "csv" : format.toLowerCase();
+        return switch (normalizedFormat) {
+            case "json" -> exportJson(detail.datasetName(), rows);
+            case "csv" -> exportCsv(detail.datasetName(), columns, rows);
+            default -> throw new IllegalArgumentException("仅支持导出 csv 或 json");
+        };
     }
 
     public void delete(Long datasetId) {
@@ -202,7 +219,7 @@ public class DatasetService {
                 return statement;
             }, keyHolder);
             persisted.add(new MetaFieldRecord(
-                keyHolder.getKey().longValue(),
+                GeneratedKeyUtils.getLongId(keyHolder, "field_id"),
                 datasetId,
                 column.fieldName(),
                 column.physicalColumnName(),
@@ -217,6 +234,36 @@ public class DatasetService {
 
     private Timestamp now() {
         return Timestamp.from(java.time.Instant.now());
+    }
+
+    private DatasetExport exportCsv(String datasetName, List<MetaFieldRecord> columns, List<Map<String, Object>> rows) {
+        StringBuilder builder = new StringBuilder();
+        builder.append(columns.stream().map(MetaFieldRecord::fieldName).reduce((left, right) -> left + "," + right).orElse("")).append('\n');
+        for (Map<String, Object> row : rows) {
+            List<String> values = new ArrayList<>();
+            for (MetaFieldRecord column : columns) {
+                Object value = row.get(column.fieldName());
+                values.add(csvEscape(value == null ? "" : String.valueOf(value)));
+            }
+            builder.append(String.join(",", values)).append('\n');
+        }
+        return new DatasetExport(datasetName + ".csv", "text/csv;charset=UTF-8", builder.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private DatasetExport exportJson(String datasetName, List<Map<String, Object>> rows) {
+        try {
+            return new DatasetExport(datasetName + ".json", "application/json", objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(rows));
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("JSON 导出失败: " + exception.getMessage(), exception);
+        }
+    }
+
+    private String csvEscape(String value) {
+        String escaped = value.replace("\"", "\"\"");
+        if (escaped.contains(",") || escaped.contains("\"") || escaped.contains("\n")) {
+            return "\"" + escaped + "\"";
+        }
+        return escaped;
     }
 
     public record CreatedDataset(Long datasetId, String datasetName, String physicalTableName, int recordCount, int fieldCount) {
@@ -262,5 +309,8 @@ public class DatasetService {
         String sampleValue,
         int fieldOrder
     ) {
+    }
+
+    public record DatasetExport(String fileName, String contentType, byte[] content) {
     }
 }

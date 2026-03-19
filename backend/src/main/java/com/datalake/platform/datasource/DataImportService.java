@@ -1,5 +1,6 @@
 package com.datalake.platform.datasource;
 
+import com.datalake.platform.common.util.GeneratedKeyUtils;
 import com.datalake.platform.dataset.DatasetService;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -151,7 +152,7 @@ public class DataImportService {
             statement.setTimestamp(10, Timestamp.from(java.time.Instant.now()));
             return statement;
         }, keyHolder);
-        return keyHolder.getKey().longValue();
+        return GeneratedKeyUtils.getLongId(keyHolder, "import_id");
     }
 
     private String detectFormat(String filename) {

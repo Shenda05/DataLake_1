@@ -1,12 +1,31 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
-import { getDatasetDetail, listDatasets, listMetadata, previewDataset, type DatasetDetail, type DatasetSummary, type MetaField } from '../api/platform';
+import {
+  exportDataset,
+  getDatasetDetail,
+  listDatasets,
+  listMetadata,
+  previewDatasetWithFilter,
+  type DatasetDetail,
+  type DatasetSummary,
+  type MetaField,
+  type PageResponse
+} from '../api/platform';
 
 const datasets = ref<DatasetSummary[]>([]);
 const metadata = ref<MetaField[]>([]);
-const preview = ref<Record<string, unknown>[]>([]);
+const previewPage = ref<PageResponse<Record<string, unknown>>>({
+  pageNum: 1,
+  pageSize: 10,
+  total: 0,
+  records: []
+});
 const selectedDataset = ref<DatasetDetail | null>(null);
+const previewFilters = reactive({
+  field: '',
+  keyword: ''
+});
 
 async function loadDatasets() {
   datasets.value = await listDatasets();
@@ -18,11 +37,58 @@ async function loadDatasets() {
 async function selectDataset(datasetId: number) {
   selectedDataset.value = await getDatasetDetail(datasetId);
   metadata.value = await listMetadata(datasetId);
-  preview.value = (await previewDataset(datasetId, 1, 10)).records;
+  previewFilters.field = '';
+  previewFilters.keyword = '';
+  await loadPreview(1);
+}
+
+async function loadPreview(pageNum = 1) {
+  if (!selectedDataset.value) return;
+  previewPage.value = await previewDatasetWithFilter(
+    selectedDataset.value.datasetId,
+    pageNum,
+    10,
+    previewFilters.field || undefined,
+    previewFilters.keyword || undefined
+  );
 }
 
 function handleRowClick(row: DatasetSummary) {
   void selectDataset(row.datasetId);
+}
+
+function handlePageChange(page: number) {
+  void loadPreview(page);
+}
+
+async function handleSearch() {
+  try {
+    await loadPreview(1);
+  } catch (error) {
+    ElMessage.error(`预览筛选失败: ${(error as Error).message}`);
+  }
+}
+
+async function handleExport(format: 'csv' | 'json') {
+  if (!selectedDataset.value) return;
+  try {
+    const result = await exportDataset(
+      selectedDataset.value.datasetId,
+      format,
+      previewFilters.field || undefined,
+      previewFilters.keyword || undefined
+    );
+    const url = window.URL.createObjectURL(result.blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = result.filename || `${selectedDataset.value.datasetName}.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    ElMessage.error(`导出失败: ${(error as Error).message}`);
+  }
 }
 
 onMounted(async () => {
@@ -75,7 +141,31 @@ onMounted(async () => {
           <el-tag>{{ selectedDataset?.formatType || 'Preview' }}</el-tag>
         </div>
       </template>
-      <el-table :data="preview" stripe>
+      <el-form inline>
+        <el-form-item label="字段">
+          <el-select v-model="previewFilters.field" clearable placeholder="全部字段">
+            <el-option
+              v-for="column in metadata"
+              :key="column.fieldId"
+              :label="column.fieldName"
+              :value="column.fieldName"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关键字">
+          <el-input v-model="previewFilters.keyword" placeholder="输入关键字搜索" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">筛选</el-button>
+        </el-form-item>
+        <el-form-item>
+          <el-button @click="handleExport('csv')">导出 CSV</el-button>
+        </el-form-item>
+        <el-form-item>
+          <el-button @click="handleExport('json')">导出 JSON</el-button>
+        </el-form-item>
+      </el-form>
+      <el-table :data="previewPage.records" stripe>
         <el-table-column
           v-for="column in metadata"
           :key="column.fieldId"
@@ -83,6 +173,14 @@ onMounted(async () => {
           :label="column.fieldName"
         />
       </el-table>
+      <el-pagination
+        class="table-pagination"
+        layout="prev, pager, next, total"
+        :total="previewPage.total"
+        :page-size="previewPage.pageSize"
+        :current-page="previewPage.pageNum"
+        @current-change="handlePageChange"
+      />
     </el-card>
   </div>
 </template>

@@ -1,44 +1,51 @@
 package com.datalake.platform.dataset;
 
 import com.datalake.platform.common.web.ApiResponse;
-import com.datalake.platform.common.web.DemoDataFactory;
 import com.datalake.platform.common.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 public class QueryAnalysisController {
 
+    private final QueryAnalysisService queryAnalysisService;
+
+    public QueryAnalysisController(QueryAnalysisService queryAnalysisService) {
+        this.queryAnalysisService = queryAnalysisService;
+    }
+
     @PostMapping("/api/queries/filter")
     public ApiResponse<?> filter(@Valid @RequestBody FilterQueryRequest body, HttpServletRequest request) {
-        return ApiResponse.success(DemoDataFactory.queryResult(), requestId(request));
+        return ApiResponse.success(queryAnalysisService.filter(new QueryAnalysisService.FilterQueryRequest(
+            body.datasetId(),
+            body.field(),
+            body.operator(),
+            body.value(),
+            body.pageNum(),
+            body.pageSize()
+        )), requestId(request));
     }
 
     @PostMapping("/api/queries/sql")
     public ApiResponse<?> sql(@Valid @RequestBody SqlQueryRequest body, HttpServletRequest request) {
-        if (!body.sql().toLowerCase().contains("select")) {
-            throw new IllegalArgumentException("仅支持 SELECT 类查询");
-        }
-        return ApiResponse.success(DemoDataFactory.queryResult(), requestId(request));
+        return ApiResponse.success(queryAnalysisService.sql(new QueryAnalysisService.SqlQueryRequest(body.datasetId(), body.sql())), requestId(request));
     }
 
     @GetMapping("/api/analysis/{datasetId}/summary")
     public ApiResponse<?> summary(@PathVariable Long datasetId, HttpServletRequest request) {
-        return ApiResponse.success(DemoDataFactory.analysisSummary(datasetId), requestId(request));
+        return ApiResponse.success(queryAnalysisService.summary(datasetId), requestId(request));
     }
 
     @GetMapping("/api/analysis/{datasetId}/charts")
     public ApiResponse<?> charts(@PathVariable Long datasetId, HttpServletRequest request) {
-        return ApiResponse.success(DemoDataFactory.chartSeries(datasetId), requestId(request));
+        return ApiResponse.success(queryAnalysisService.charts(datasetId), requestId(request));
     }
 
     private String requestId(HttpServletRequest request) {
@@ -49,7 +56,9 @@ public class QueryAnalysisController {
         @NotNull(message = "datasetId 不能为空") Long datasetId,
         @NotBlank(message = "field 不能为空") String field,
         @NotBlank(message = "operator 不能为空") String operator,
-        @NotBlank(message = "value 不能为空") String value
+        @NotBlank(message = "value 不能为空") String value,
+        Integer pageNum,
+        Integer pageSize
     ) {
     }
 
@@ -59,4 +68,3 @@ public class QueryAnalysisController {
     ) {
     }
 }
-
