@@ -1,31 +1,60 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { ElMessage } from 'element-plus';
 import * as echarts from 'echarts';
-import { overview, recentTasks, taskTrend } from '../mock/api';
+import { getOverview, getRecentTasks, getTaskTrend } from '../api/platform';
 
 const chartRef = ref<HTMLDivElement | null>(null);
+const overview = ref({
+  dataSources: 0,
+  datasets: 0,
+  newDatasetsToday: 0,
+  totalTasks: 0,
+  runningTasks: 0,
+  successTasks: 0,
+  failedTasks: 0
+});
+const taskTrend = ref<{ day: string; total: number }[]>([]);
+const recentTasks = ref<{ taskId: number; taskName: string; taskType: string; status: string; nextRunTime?: string | null }[]>([]);
 let chart: echarts.ECharts | null = null;
 
-onMounted(async () => {
+async function renderChart() {
   await nextTick();
   if (!chartRef.value) return;
-  chart = echarts.init(chartRef.value);
+  if (!chart) {
+    chart = echarts.init(chartRef.value);
+  }
   chart.setOption({
     grid: { left: 24, right: 24, top: 28, bottom: 24 },
-    xAxis: { type: 'category', data: taskTrend.map((item) => item.day) },
+    xAxis: { type: 'category', data: taskTrend.value.map((item) => item.day) },
     yAxis: { type: 'value' },
     tooltip: { trigger: 'axis' },
     series: [
       {
         type: 'line',
         smooth: true,
-        data: taskTrend.map((item) => item.total),
+        data: taskTrend.value.map((item) => item.total),
         areaStyle: {},
         lineStyle: { width: 3, color: '#1f8f6b' },
         itemStyle: { color: '#1f8f6b' }
       }
     ]
   });
+}
+
+async function loadData() {
+  overview.value = await getOverview();
+  taskTrend.value = await getTaskTrend();
+  recentTasks.value = await getRecentTasks();
+  await renderChart();
+}
+
+onMounted(async () => {
+  try {
+    await loadData();
+  } catch (error) {
+    ElMessage.error(`首页数据加载失败: ${(error as Error).message}`);
+  }
 });
 
 onBeforeUnmount(() => {
@@ -75,7 +104,7 @@ onBeforeUnmount(() => {
         <template #header>
           <div class="card-header">
             <span>近 7 天任务趋势</span>
-            <el-tag type="success">可替换为真实接口</el-tag>
+            <el-tag type="success">Real Data</el-tag>
           </div>
         </template>
         <div ref="chartRef" class="chart-box"></div>
@@ -103,4 +132,3 @@ onBeforeUnmount(() => {
     </section>
   </div>
 </template>
-

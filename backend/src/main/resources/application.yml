@@ -16,6 +16,9 @@ spring:
     multipart:
       max-file-size: 20MB
       max-request-size: 20MB
+  sql:
+    init:
+      mode: always
 
 springdoc:
   swagger-ui:
@@ -25,8 +28,9 @@ app:
   jwt:
     secret: change-me-for-production-demo-secret-2026
     expire-seconds: 7200
+  storage:
+    root: ../storage
 
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-

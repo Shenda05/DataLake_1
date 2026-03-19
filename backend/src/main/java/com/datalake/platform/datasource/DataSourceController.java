@@ -1,11 +1,12 @@
 package com.datalake.platform.datasource;
 
+import com.datalake.platform.common.security.SecurityUtils;
 import com.datalake.platform.common.web.ApiResponse;
-import com.datalake.platform.common.web.DemoDataFactory;
 import com.datalake.platform.common.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,35 +20,40 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/data-sources")
 public class DataSourceController {
 
+    private final DataSourceService dataSourceService;
+
+    public DataSourceController(DataSourceService dataSourceService) {
+        this.dataSourceService = dataSourceService;
+    }
+
     @GetMapping
     public ApiResponse<?> list(HttpServletRequest request) {
-        return ApiResponse.success(DemoDataFactory.dataSources(), requestId(request));
+        return ApiResponse.success(dataSourceService.list(), requestId(request));
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<?> create(@Valid @RequestBody UpsertDataSourceRequest body, HttpServletRequest request) {
-        return ApiResponse.success(
-            DemoDataFactory.ordered("sourceId", 1003L, "sourceName", body.sourceName(), "sourceType", body.sourceType(), "status", "ENABLED"),
-            requestId(request)
-        );
+        return ApiResponse.success(dataSourceService.create(body, SecurityUtils.currentUser().userId()), requestId(request));
     }
 
     @PutMapping("/{sourceId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<?> update(@PathVariable Long sourceId, @Valid @RequestBody UpsertDataSourceRequest body, HttpServletRequest request) {
-        return ApiResponse.success(
-            DemoDataFactory.ordered("sourceId", sourceId, "sourceName", body.sourceName(), "sourceType", body.sourceType(), "status", "ENABLED"),
-            requestId(request)
-        );
+        return ApiResponse.success(dataSourceService.update(sourceId, body), requestId(request));
     }
 
     @DeleteMapping("/{sourceId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<Void> delete(@PathVariable Long sourceId, HttpServletRequest request) {
+        dataSourceService.delete(sourceId);
         return ApiResponse.success(requestId(request));
     }
 
     @PostMapping("/{sourceId}/test")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<?> testConnection(@PathVariable Long sourceId, HttpServletRequest request) {
-        return ApiResponse.success(DemoDataFactory.ordered("sourceId", sourceId, "connected", true, "message", "连接测试成功"), requestId(request));
+        return ApiResponse.success(dataSourceService.test(sourceId), requestId(request));
     }
 
     private String requestId(HttpServletRequest request) {
@@ -66,4 +72,3 @@ public class DataSourceController {
     ) {
     }
 }
-

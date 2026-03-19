@@ -40,7 +40,7 @@ async function submit() {
         <template #header>
           <div class="card-header">
             <span>账号登录</span>
-            <el-tag>Mock Ready</el-tag>
+            <el-tag type="success">Real API</el-tag>
           </div>
         </template>
         <el-form label-position="top">
@@ -56,11 +56,10 @@ async function submit() {
         </el-form>
         <div class="demo-accounts">
           <p>演示账号</p>
-          <p>`admin / admin123`</p>
-          <p>`operator / operator123`</p>
+          <p>admin / admin123</p>
+          <p>operator / operator123</p>
         </div>
       </el-card>
     </div>
   </div>
 </template>
-

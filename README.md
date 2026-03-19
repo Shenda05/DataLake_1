@@ -1,20 +1,21 @@
 # 数据湖管理平台
 
-这是一个面向课程项目的数据湖管理平台仓库骨架，按 `frontend + backend + docs + database` 四层组织，目的是把现有的产品设计文档直接落成一个可以分工开发的工程起点。
+这是一个面向课程项目的数据湖管理平台工程仓库，按 `frontend + backend + docs + database` 四层组织。当前 `develop` 已经把“登录 -> 首页 -> 数据源 -> 文件导入 -> 数据集列表”这条主链路从 Mock 替换成了真实后端接口。
 
 ## 当前已落地内容
 
-- `frontend/`：Vue 3 + Element Plus + Pinia + ECharts 的后台管理前端骨架。
-- `backend/`：Spring Boot 风格的后端工程骨架，包含认证、仪表盘、数据源、数据集、治理、任务和日志接口入口。
-- `database/`：核心 9 个实体的 MySQL 建表脚本。
+- `frontend/`：Vue 3 + Element Plus + Pinia + ECharts 前端，登录、首页、数据源、文件导入和数据集页已接入真实 API。
+- `backend/`：Spring Boot 后端，已实现 JWT 登录鉴权、仪表盘聚合、数据源持久化、文件导入、元数据生成和数据集列表/预览。
+- `database/`：包含 `sys_user`、`sys_role`、`data_source`、`import_record`、`data_set`、`meta_field` 等表结构。
 - `docs/`：接口约定、架构说明、周计划与测试计划。
+- `storage/`：运行时自动生成，用于保存上传原文件。
 
-## 建议开发顺序
-
-1. 先完成 `docs/api-contract.md` 和 `database/schema.sql` 的评审。
-2. 前端按 `frontend/src/router/index.ts` 的菜单路由分模块开发。
-3. 后端按 `backend/src/main/java/com/datalake/platform` 下的模块目录分接口开发。
-4. 第一次联调优先打通 `登录 -> 首页 -> 数据源 -> 数据导入 -> 数据集列表`。
+## 当前主链路
+1. 使用默认账号登录，前端从后端获取 token 和菜单权限。
+2. 首页从数据库读取统计卡片、近 7 天任务趋势和最近任务。
+3. 管理员可以创建、测试和删除数据源。
+4. 文件导入支持 `CSV / JSON / Excel`，导入后自动生成数据集和元数据。
+5. 数据集页支持真实列表、元数据查看和分页预览。
 
 ## 本地启动
 
@@ -26,7 +27,11 @@ npm install
 npm run dev
 ```
 
-默认使用本地 Mock 数据，适合 Week 1-2 并行开发。
+默认访问 `http://localhost:8080/api`。如果后端改了端口，可以这样启动：
+
+```bash
+VITE_API_BASE_URL=http://localhost:8081/api npm run dev
+```
 
 ### 后端
 
@@ -37,12 +42,18 @@ cd backend
 env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home' PATH='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home/bin':$PATH mvn spring-boot:run
 ```
 
-后端当前以接口骨架和示例数据为主，重点是先固定接口结构、统一返回值和模块边界。
+后端默认使用 H2 内存库，启动时会自动初始化表结构和默认账号。
 
 如果本机 `8080` 已被占用，可临时改端口启动：
 
 ```bash
 env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home' PATH='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home/bin':$PATH mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+```
+
+如果需要切到 MySQL，可先创建数据库 `data_lake_platform`，再使用：
+
+```bash
+env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home' PATH='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home/bin':$PATH mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 ```
 
 ## 目录结构
@@ -65,6 +76,6 @@ env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Conte
 
 ## 下一步建议
 
-- Week 3 开始将前端 Mock 接口逐步替换为真实后端接口。
-- Week 4 前冻结字段命名、分页格式、异常码与任务日志结构。
-- Week 6 前保证治理结果以“新数据集”方式落库，避免覆盖原始数据。
+- 继续把查询分析页切到真实接口。
+- 为数据预览补搜索和字段筛选。
+- 在 MySQL 环境补一轮完整联调，确认文件存储路径和字符集设置。

@@ -1,11 +1,11 @@
 package com.datalake.platform.datasource;
 
+import com.datalake.platform.common.security.SecurityUtils;
 import com.datalake.platform.common.web.ApiResponse;
-import com.datalake.platform.common.web.DemoDataFactory;
 import com.datalake.platform.common.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
-import java.util.Map;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,6 +18,12 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/api/imports")
 public class DataImportController {
 
+    private final DataImportService dataImportService;
+
+    public DataImportController(DataImportService dataImportService) {
+        this.dataImportService = dataImportService;
+    }
+
     @PostMapping("/file")
     public ApiResponse<?> importFile(
         @RequestParam("file") MultipartFile file,
@@ -28,18 +34,14 @@ public class DataImportController {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("上传文件不能为空");
         }
-        String filename = file.getOriginalFilename() == null ? "unknown" : file.getOriginalFilename();
-        return ApiResponse.success(
-            Map.of(
-                "importId", 5003L,
-                "datasetName", datasetName,
-                "sourceId", sourceId,
-                "filename", filename,
-                "status", "SUCCESS",
-                "message", "文件上传成功，后续可接入真实解析逻辑"
-            ),
-            requestId(request)
-        );
+        try {
+            return ApiResponse.success(
+                dataImportService.importFile(file, datasetName, sourceId, SecurityUtils.currentUser().userId()),
+                requestId(request)
+            );
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("文件导入失败: " + exception.getMessage(), exception);
+        }
     }
 
     @PostMapping("/database")
@@ -48,27 +50,20 @@ public class DataImportController {
         @RequestParam("tableName") String tableName,
         HttpServletRequest request
     ) {
-        return ApiResponse.success(
-            Map.of("importId", 5004L, "sourceId", sourceId, "tableName", tableName, "status", "PENDING"),
-            requestId(request)
-        );
+        throw new IllegalArgumentException("当前分支暂未启用数据库表导入，请优先使用文件导入");
     }
 
     @GetMapping("/history")
     public ApiResponse<?> history(HttpServletRequest request) {
-        return ApiResponse.success(DemoDataFactory.importHistory(), requestId(request));
+        return ApiResponse.success(dataImportService.history(), requestId(request));
     }
 
     @GetMapping("/{importId}")
     public ApiResponse<?> detail(@PathVariable Long importId, HttpServletRequest request) {
-        return ApiResponse.success(
-            Map.of("importId", importId, "status", "SUCCESS", "recordCount", 1280, "errorReason", ""),
-            requestId(request)
-        );
+        return ApiResponse.success(dataImportService.detail(importId), requestId(request));
     }
 
     private String requestId(HttpServletRequest request) {
         return request.getAttribute(RequestIdFilter.REQUEST_ID_ATTR).toString();
     }
 }
-

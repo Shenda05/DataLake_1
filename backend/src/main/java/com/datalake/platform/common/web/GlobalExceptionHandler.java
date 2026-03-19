@@ -2,6 +2,8 @@ package com.datalake.platform.common.web;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -16,6 +18,18 @@ public class GlobalExceptionHandler {
             .body(ApiResponse.failure(40001, exception.getMessage(), requestId(request)));
     }
 
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnauthorized(AuthenticationException exception, HttpServletRequest request) {
+        return ResponseEntity.status(401)
+            .body(ApiResponse.failure(40101, exception.getMessage(), requestId(request)));
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleForbidden(AccessDeniedException exception, HttpServletRequest request) {
+        return ResponseEntity.status(403)
+            .body(ApiResponse.failure(40301, exception.getMessage(), requestId(request)));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception exception, HttpServletRequest request) {
         return ResponseEntity.internalServerError()
@@ -27,4 +41,3 @@ public class GlobalExceptionHandler {
         return requestId == null ? "req-unknown" : requestId.toString();
     }
 }
-

@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { demoUsers, menuPermissions, mockLogin, type UserProfile } from '../mock/api';
+import { login as requestLogin, type LoginResult } from '../api/platform';
 
-const TOKEN_KEY = 'data-lake-demo-token';
-const PROFILE_KEY = 'data-lake-demo-profile';
+type UserProfile = Pick<LoginResult, 'username' | 'role' | 'displayName' | 'menus'>;
+
+const TOKEN_KEY = 'data-lake-auth-token';
+const PROFILE_KEY = 'data-lake-auth-profile';
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem(TOKEN_KEY) || '');
@@ -15,17 +17,19 @@ export const useAuthStore = defineStore('auth', () => {
   );
 
   const isLoggedIn = computed(() => Boolean(token.value && profile.value));
-  const allowedMenus = computed(() => {
-    if (!profile.value) return [];
-    return [...menuPermissions[profile.value.role]];
-  });
+  const allowedMenus = computed(() => profile.value?.menus || []);
 
   async function login(username: string, password: string) {
-    const user = await mockLogin(username, password);
-    token.value = `mock-token-${user.username}`;
-    profile.value = user;
+    const result = await loginApi({ username, password });
+    token.value = result.token;
+    profile.value = {
+      username: result.username,
+      role: result.role,
+      displayName: result.displayName,
+      menus: result.menus
+    };
     localStorage.setItem(TOKEN_KEY, token.value);
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(user));
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile.value));
   }
 
   function logout() {
@@ -40,9 +44,11 @@ export const useAuthStore = defineStore('auth', () => {
     profile,
     isLoggedIn,
     allowedMenus,
-    demoAccounts: demoUsers,
     login,
     logout
   };
 });
 
+async function loginApi(payload: { username: string; password: string }) {
+  return requestLogin(payload);
+}
