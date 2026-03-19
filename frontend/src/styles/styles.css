@@ -131,6 +131,28 @@ body {
   gap: 10px;
 }
 
+.hero-side {
+  display: grid;
+  gap: 14px;
+  justify-items: end;
+}
+
+.hero-actions,
+.quick-links,
+.detail-actions,
+.card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hero-meta,
+.inline-tip {
+  color: var(--ink-1);
+  font-size: 14px;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -225,6 +247,52 @@ body {
   font-size: 28px;
 }
 
+.event-stream {
+  display: grid;
+  gap: 16px;
+}
+
+.event-item {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.event-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.event-dot {
+  width: 12px;
+  height: 12px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+  box-shadow: 0 0 0 6px rgba(31, 143, 107, 0.12);
+}
+
+.event-content {
+  display: grid;
+  gap: 8px;
+}
+
+.event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.event-meta,
+.event-summary {
+  margin: 0;
+  color: var(--ink-1);
+  line-height: 1.7;
+}
+
 .demo-accounts {
   margin-top: 20px;
   color: var(--ink-1);
@@ -241,6 +309,10 @@ body {
 
   .hero-panel {
     align-items: flex-start;
+  }
+
+  .hero-side {
+    justify-items: start;
   }
 
   .sidebar {

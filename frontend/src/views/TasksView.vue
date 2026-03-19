@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useRoute } from 'vue-router';
 import {
   createTask,
   listGovernanceFlows,
@@ -17,6 +18,7 @@ import {
   type TaskSummary
 } from '../api/platform';
 
+const route = useRoute();
 const tasks = ref<TaskSummary[]>([]);
 const flows = ref<GovernanceFlow[]>([]);
 const importHistory = ref<ImportHistory[]>([]);
@@ -75,6 +77,13 @@ async function loadData(showMessage = false) {
   flows.value = flowItems;
   importHistory.value = importItems;
   latestLogs.value = logItems;
+  const routeTaskId = Number(route.query.taskId);
+  if (Number.isInteger(routeTaskId) && routeTaskId > 0) {
+    const matchedTask = tasks.value.find((item) => item.taskId === routeTaskId);
+    if (matchedTask) {
+      loadTask(matchedTask);
+    }
+  }
   if (!form.targetId || !targetOptions.value.some((item) => item.value === form.targetId)) {
     form.targetId = targetOptions.value[0].value;
   }
@@ -207,6 +216,19 @@ function stopAutoRefresh() {
 watch([autoRefreshEnabled, refreshSeconds], () => {
   startAutoRefresh();
 });
+
+watch(
+  () => route.query.taskId,
+  (value) => {
+    const taskId = Number(value);
+    if (Number.isInteger(taskId) && taskId > 0) {
+      const matchedTask = tasks.value.find((item) => item.taskId === taskId);
+      if (matchedTask) {
+        loadTask(matchedTask);
+      }
+    }
+  }
+);
 
 onMounted(async () => {
   try {

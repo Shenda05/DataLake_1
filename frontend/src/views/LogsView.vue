@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useRoute, useRouter } from 'vue-router';
 import { getTaskLogDetail, listTaskLogs, type TaskLogDetail, type TaskLogSummary } from '../api/platform';
 
+const route = useRoute();
+const router = useRouter();
 const logs = ref<TaskLogSummary[]>([]);
 const selectedLog = ref<TaskLogDetail | null>(null);
+const lastSyncedAt = ref('');
 const filters = reactive({
   keyword: '',
   status: '',
@@ -36,7 +40,11 @@ const avgDuration = computed(() => {
 
 async function loadData() {
   logs.value = await listTaskLogs();
-  if (logs.value.length > 0) {
+  lastSyncedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const queryLogId = Number(route.query.logId);
+  if (Number.isInteger(queryLogId) && queryLogId > 0 && logs.value.some((item) => item.logId === queryLogId)) {
+    await selectLog(queryLogId);
+  } else if (logs.value.length > 0) {
     await selectLog(logs.value[0].logId);
   } else {
     selectedLog.value = null;
@@ -68,6 +76,44 @@ function resetFilters() {
   filters.taskType = '';
 }
 
+function formatTaskType(taskType: string) {
+  return taskType === 'GOVERNANCE' ? '治理任务' : taskType === 'IMPORT' ? '导入任务' : taskType;
+}
+
+function goToDashboard() {
+  void router.push({ name: 'dashboard' });
+}
+
+function goToTasks(log?: TaskLogSummary | TaskLogDetail | null) {
+  if (!log?.taskId) {
+    return;
+  }
+  void router.push({ name: 'tasks', query: { taskId: String(log.taskId), logId: String(log.logId) } });
+}
+
+function goToTarget(log?: TaskLogSummary | TaskLogDetail | null) {
+  if (!log) {
+    return;
+  }
+  if (log.taskType === 'GOVERNANCE') {
+    void router.push({ name: 'governance', query: log.targetId ? { flowId: String(log.targetId) } : undefined });
+    return;
+  }
+  if (log.taskType === 'IMPORT') {
+    void router.push({ name: 'imports', query: log.targetId ? { importId: String(log.targetId) } : undefined });
+  }
+}
+
+watch(
+  () => route.query.logId,
+  async (value) => {
+    const logId = Number(value);
+    if (Number.isInteger(logId) && logId > 0 && logs.value.some((item) => item.logId === logId)) {
+      await selectLog(logId);
+    }
+  }
+);
+
 onMounted(async () => {
   try {
     await loadData();
@@ -83,18 +129,22 @@ onMounted(async () => {
       <el-card shadow="hover">
         <p class="stat-label">成功日志</p>
         <p class="stat-value">{{ successCount }}</p>
+        <el-button link type="primary" @click="goToDashboard">回首页概览</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">失败日志</p>
         <p class="stat-value">{{ failedCount }}</p>
+        <el-button link type="primary" @click="goToDashboard">查看全局状态</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">运行中</p>
         <p class="stat-value">{{ runningCount }}</p>
+        <el-button link type="primary" @click="goToTasks(selectedLog)">前往任务页</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">平均耗时</p>
         <p class="stat-value">{{ avgDuration }}s</p>
+        <el-button link type="primary" @click="goToTarget(selectedLog)">查看来源模块</el-button>
       </el-card>
     </section>
 
@@ -103,9 +153,11 @@ onMounted(async () => {
         <template #header>
           <div class="card-header">
             <span>日志筛选</span>
-            <div>
+            <div class="card-header-actions">
+              <span class="inline-tip">最近同步 {{ lastSyncedAt || '--:--:--' }}</span>
               <el-button link type="primary" @click="resetFilters">重置</el-button>
               <el-button link type="primary" @click="loadData">刷新</el-button>
+              <el-button link type="primary" @click="goToDashboard">回首页</el-button>
             </div>
           </div>
         </template>
@@ -135,12 +187,19 @@ onMounted(async () => {
       <template #header>
         <div class="card-header">
           <span>任务日志</span>
-          <el-tag type="success">实时列表</el-tag>
+          <div class="card-header-actions">
+            <el-tag type="success">实时列表</el-tag>
+            <el-button link type="primary" @click="goToTasks(selectedLog)">查看对应任务</el-button>
+          </div>
         </div>
       </template>
       <el-table :data="filteredLogs" stripe @row-click="(row: TaskLogSummary) => selectLog(row.logId)">
         <el-table-column prop="taskName" label="任务名称" />
-        <el-table-column prop="taskType" label="类型" width="120" />
+        <el-table-column label="类型" width="120">
+          <template #default="{ row }">
+            {{ formatTaskType(row.taskType) }}
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="120">
           <template #default="{ row }">
             <el-tag :type="statusTagType(row.status)">{{ row.status }}</el-tag>
@@ -150,6 +209,12 @@ onMounted(async () => {
         <el-table-column prop="endTime" label="结束时间" />
         <el-table-column prop="duration" label="耗时(秒)" width="100" />
         <el-table-column prop="executionSummary" label="执行摘要" />
+        <el-table-column label="跳转" width="170">
+          <template #default="{ row }">
+            <el-button link type="primary" @click.stop="goToTasks(row)">任务页</el-button>
+            <el-button link @click.stop="goToTarget(row)">来源页</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
 
@@ -157,13 +222,17 @@ onMounted(async () => {
       <template #header>
         <div class="card-header">
           <span>日志详情</span>
-          <el-tag :type="statusTagType(selectedLog?.status || '')">{{ selectedLog?.status || '未选择' }}</el-tag>
+          <div class="card-header-actions">
+            <el-tag :type="statusTagType(selectedLog?.status || '')">{{ selectedLog?.status || '未选择' }}</el-tag>
+            <el-button link type="primary" @click="goToTasks(selectedLog)">对应任务</el-button>
+            <el-button link @click="goToTarget(selectedLog)">来源页面</el-button>
+          </div>
         </div>
       </template>
       <div v-if="selectedLog" class="page-grid">
         <el-descriptions :column="1" border>
           <el-descriptions-item label="任务名称">{{ selectedLog.taskName }}</el-descriptions-item>
-          <el-descriptions-item label="任务类型">{{ selectedLog.taskType }}</el-descriptions-item>
+          <el-descriptions-item label="任务类型">{{ formatTaskType(selectedLog.taskType) }}</el-descriptions-item>
           <el-descriptions-item label="目标 ID">{{ selectedLog.targetId ?? '-' }}</el-descriptions-item>
           <el-descriptions-item label="开始时间">{{ selectedLog.startTime || '-' }}</el-descriptions-item>
           <el-descriptions-item label="结束时间">{{ selectedLog.endTime || '-' }}</el-descriptions-item>
@@ -188,6 +257,11 @@ onMounted(async () => {
           type="success"
           :closable="false"
         />
+        <div class="detail-actions">
+          <el-button type="primary" @click="goToTasks(selectedLog)">去任务调度继续观察</el-button>
+          <el-button @click="goToTarget(selectedLog)">回到来源模块</el-button>
+          <el-button link type="primary" @click="goToDashboard">返回首页总览</el-button>
+        </div>
       </div>
       <el-empty v-else description="暂无日志详情" />
     </el-card>
