@@ -22,6 +22,7 @@ public class DataBootstrapRunner implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         bootstrapRoles();
         bootstrapUsers();
+        bootstrapOperators();
     }
 
     private void bootstrapRoles() {
@@ -56,6 +57,30 @@ public class DataBootstrapRunner implements ApplicationRunner {
             operatorRoleId,
             "ENABLED",
             now(),
+            now()
+        );
+    }
+
+    private void bootstrapOperators() {
+        Integer count = jdbcTemplate.queryForObject("select count(*) from operator_def", Integer.class);
+        if (count != null && count > 0) {
+            return;
+        }
+        insertOperator("空值填充", "NULL_FILL", "CLEAN", "{\"field\":\"string\",\"fillValue\":\"string\"}", "将空值替换为指定内容");
+        insertOperator("重复数据清理", "DEDUPLICATE", "DEDUP", "{\"fields\":[\"string\"]}", "按指定字段去重");
+        insertOperator("字段转换", "FIELD_CONVERT", "TRANSFORM", "{\"field\":\"string\",\"transform\":\"TRIM|UPPER|LOWER|NUMBER\"}", "执行字段清洗与格式转换");
+        insertOperator("条件过滤", "FILTER_KEEP", "FILTER", "{\"field\":\"string\",\"operator\":\"LIKE|EQ|GT|LT\",\"value\":\"string\"}", "仅保留符合条件的记录");
+    }
+
+    private void insertOperator(String operatorName, String operatorKey, String operatorType, String configSchema, String description) {
+        jdbcTemplate.update(
+            "insert into operator_def(operator_name,operator_key,operator_type,config_schema,description,status,create_time) values(?,?,?,?,?,?,?)",
+            operatorName,
+            operatorKey,
+            operatorType,
+            configSchema,
+            description,
+            "ENABLED",
             now()
         );
     }

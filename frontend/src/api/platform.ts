@@ -68,6 +68,85 @@ export type PageResponse<T> = {
   records: T[];
 };
 
+export type GovernanceStep = {
+  operatorKey: string;
+  params: Record<string, unknown>;
+};
+
+export type GovernanceOperator = {
+  operatorId: number;
+  operatorName: string;
+  operatorKey: string;
+  operatorType: string;
+  description: string;
+  status: string;
+};
+
+export type GovernanceFlow = {
+  flowId: number;
+  flowName: string;
+  inputDatasetId: number;
+  inputDatasetName: string;
+  outputDatasetId?: number | null;
+  outputDatasetName?: string | null;
+  operatorChain: GovernanceStep[];
+  creator?: number | null;
+  creatorName?: string | null;
+  createTime?: string | null;
+  updateTime?: string | null;
+};
+
+export type GovernanceExecutionResult = {
+  inputDatasetId: number;
+  outputDatasetId: number;
+  outputDatasetName: string;
+  operatorCount: number;
+  logRef: number;
+  summary: string;
+};
+
+export type TaskSummary = {
+  taskId: number;
+  taskName: string;
+  taskType: 'IMPORT' | 'GOVERNANCE';
+  targetId: number;
+  targetName?: string | null;
+  cronExpr: string;
+  status: string;
+  retryPolicy: number;
+  description?: string | null;
+  nextRunTime?: string | null;
+  lastRunTime?: string | null;
+  createUser?: number | null;
+};
+
+export type TaskActionResponse = {
+  taskId: number;
+  status: string;
+  logId?: number | null;
+  message: string;
+  nextRunTime?: string | null;
+};
+
+export type TaskLogSummary = {
+  logId: number;
+  taskId?: number | null;
+  taskName: string;
+  taskType: string;
+  targetId?: number | null;
+  status: string;
+  startTime?: string | null;
+  endTime?: string | null;
+  duration: number;
+  executionSummary?: string | null;
+  errorMessage?: string | null;
+};
+
+export type TaskLogDetail = TaskLogSummary & {
+  operatorUser?: number | null;
+  createTime?: string | null;
+};
+
 export function login(payload: { username: string; password: string }) {
   return apiPost<LoginResult>('/auth/login', payload);
 }
@@ -178,4 +257,79 @@ export function getAnalysisSummary(datasetId: number) {
 
 export function getAnalysisCharts(datasetId: number) {
   return apiGet<{ name: string; value: number }[]>(`/analysis/${datasetId}/charts`);
+}
+
+export function listGovernanceOperators() {
+  return apiGet<GovernanceOperator[]>('/governance/operators');
+}
+
+export function listGovernanceFlows() {
+  return apiGet<GovernanceFlow[]>('/governance/flows');
+}
+
+export function createGovernanceFlow(payload: {
+  flowName: string;
+  datasetId: number;
+  operatorChain: GovernanceStep[];
+}) {
+  return apiPost<{ flowId: number; flowName: string; operatorCount: number }>('/governance/flows', payload);
+}
+
+export function executeGovernanceFlow(payload: {
+  datasetId: number;
+  operatorChain: GovernanceStep[];
+  executionName?: string;
+}) {
+  return apiPost<GovernanceExecutionResult>('/governance/execute', payload);
+}
+
+export function listTasks() {
+  return apiGet<TaskSummary[]>('/tasks');
+}
+
+export function createTask(payload: {
+  taskName: string;
+  taskType: 'IMPORT' | 'GOVERNANCE';
+  targetId: number;
+  cronExpr: string;
+  retryPolicy?: number;
+  description?: string;
+  status?: string;
+}) {
+  return apiPost<TaskSummary>('/tasks', payload);
+}
+
+export function updateTask(
+  taskId: number,
+  payload: {
+    taskName: string;
+    taskType: 'IMPORT' | 'GOVERNANCE';
+    targetId: number;
+    cronExpr: string;
+    retryPolicy?: number;
+    description?: string;
+    status?: string;
+  }
+) {
+  return apiPut<TaskSummary>(`/tasks/${taskId}`, payload);
+}
+
+export function triggerTask(taskId: number) {
+  return apiPost<TaskActionResponse>(`/tasks/${taskId}/trigger`);
+}
+
+export function pauseTask(taskId: number) {
+  return apiPost<TaskActionResponse>(`/tasks/${taskId}/pause`);
+}
+
+export function resumeTask(taskId: number) {
+  return apiPost<TaskActionResponse>(`/tasks/${taskId}/resume`);
+}
+
+export function listTaskLogs() {
+  return apiGet<TaskLogSummary[]>('/task-logs');
+}
+
+export function getTaskLogDetail(logId: number) {
+  return apiGet<TaskLogDetail>(`/task-logs/${logId}`);
 }

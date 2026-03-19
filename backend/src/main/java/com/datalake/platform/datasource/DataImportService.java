@@ -70,6 +70,56 @@ public class DataImportService {
         }
     }
 
+    public ImportResult rerunImport(Long importId, Long userId, String triggerName) {
+        ImportDetail detail = detail(importId);
+        Path path = Path.of(detail.filePath()).toAbsolutePath().normalize();
+        if (!Files.exists(path)) {
+            throw new IllegalArgumentException("导入源文件不存在: " + path);
+        }
+        String datasetName = buildRerunDatasetName(detail.datasetName(), triggerName);
+        KeyHolder keyHolder = new GeneratedKeyHolder();
+        try {
+            FileParserService.ParsedFile parsedFile = fileParserService.parse(path, detail.originalFileName(), detail.formatType());
+            Long newImportId = insertImportRecord(
+                detail.sourceId(),
+                datasetName,
+                parsedFile.formatType(),
+                detail.originalFileName(),
+                path,
+                "SUCCESS",
+                parsedFile.rows().size(),
+                null,
+                userId,
+                keyHolder
+            );
+            DatasetService.CreatedDataset dataset = datasetService.createImportedDataset(
+                detail.sourceId(),
+                datasetName,
+                parsedFile.formatType(),
+                path.toString(),
+                "任务调度重新导入的数据集",
+                userId,
+                parsedFile.columns(),
+                parsedFile.rows()
+            );
+            return new ImportResult(newImportId, dataset.datasetId(), dataset.datasetName(), parsedFile.formatType(), dataset.recordCount(), "SUCCESS", "");
+        } catch (Exception exception) {
+            insertImportRecord(
+                detail.sourceId(),
+                datasetName,
+                detail.formatType(),
+                detail.originalFileName(),
+                path,
+                "FAILED",
+                0,
+                exception.getMessage(),
+                userId,
+                keyHolder
+            );
+            throw new IllegalArgumentException("任务导入失败: " + exception.getMessage(), exception);
+        }
+    }
+
     public List<ImportHistoryItem> history() {
         return jdbcTemplate.query(
             """
@@ -164,6 +214,11 @@ public class DataImportService {
             return "JSON";
         }
         return "EXCEL";
+    }
+
+    private String buildRerunDatasetName(String datasetName, String triggerName) {
+        String prefix = triggerName == null || triggerName.isBlank() ? datasetName + "_重新导入" : triggerName + "_导入结果";
+        return prefix + "_" + java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
     }
 
     public record ImportResult(
