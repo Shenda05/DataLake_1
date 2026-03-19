@@ -1,9 +1,16 @@
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
-import { demoUsers, menuPermissions, mockLogin, type UserProfile } from '../mock/api';
+import { login as loginApi, type LoginResult } from '../api/platform';
 
-const TOKEN_KEY = 'data-lake-demo-token';
-const PROFILE_KEY = 'data-lake-demo-profile';
+const TOKEN_KEY = 'data-lake-auth-token';
+const PROFILE_KEY = 'data-lake-auth-profile';
+const MENUS_KEY = 'data-lake-auth-menus';
+
+export type UserProfile = {
+  username: string;
+  role: 'ADMIN' | 'OPERATOR';
+  displayName: string;
+};
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem(TOKEN_KEY) || '');
@@ -13,26 +20,37 @@ export const useAuthStore = defineStore('auth', () => {
       return raw ? (JSON.parse(raw) as UserProfile) : null;
     })()
   );
+  const menus = ref<string[]>(
+    (() => {
+      const raw = localStorage.getItem(MENUS_KEY);
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    })()
+  );
 
   const isLoggedIn = computed(() => Boolean(token.value && profile.value));
-  const allowedMenus = computed(() => {
-    if (!profile.value) return [];
-    return [...menuPermissions[profile.value.role]];
-  });
+  const allowedMenus = computed(() => menus.value);
 
   async function login(username: string, password: string) {
-    const user = await mockLogin(username, password);
-    token.value = `mock-token-${user.username}`;
-    profile.value = user;
+    const user = await loginApi({ username, password });
+    token.value = user.token;
+    profile.value = {
+      username: user.username,
+      role: user.role,
+      displayName: user.displayName
+    };
+    menus.value = user.menus;
     localStorage.setItem(TOKEN_KEY, token.value);
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(user));
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile.value));
+    localStorage.setItem(MENUS_KEY, JSON.stringify(menus.value));
   }
 
   function logout() {
     token.value = '';
     profile.value = null;
+    menus.value = [];
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(PROFILE_KEY);
+    localStorage.removeItem(MENUS_KEY);
   }
 
   return {
@@ -40,9 +58,7 @@ export const useAuthStore = defineStore('auth', () => {
     profile,
     isLoggedIn,
     allowedMenus,
-    demoAccounts: demoUsers,
     login,
     logout
   };
 });
-

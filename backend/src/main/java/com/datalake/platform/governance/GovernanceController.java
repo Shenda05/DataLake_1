@@ -1,8 +1,8 @@
 package com.datalake.platform.governance;
 
 import com.datalake.platform.common.web.ApiResponse;
-import com.datalake.platform.common.web.DemoDataFactory;
 import com.datalake.platform.common.web.RequestIdFilter;
+import com.datalake.platform.common.security.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -20,20 +20,31 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/governance")
 public class GovernanceController {
 
+    private final GovernanceService governanceService;
+
+    public GovernanceController(GovernanceService governanceService) {
+        this.governanceService = governanceService;
+    }
+
     @GetMapping("/operators")
     public ApiResponse<?> operators(HttpServletRequest request) {
-        return ApiResponse.success(DemoDataFactory.operators(), requestId(request));
+        return ApiResponse.success(governanceService.listOperators(), requestId(request));
     }
 
     @GetMapping("/flows")
     public ApiResponse<?> flows(HttpServletRequest request) {
-        return ApiResponse.success(DemoDataFactory.governanceFlows(), requestId(request));
+        return ApiResponse.success(governanceService.listFlows(), requestId(request));
     }
 
     @PostMapping("/flows")
     public ApiResponse<?> createFlow(@Valid @RequestBody SaveFlowRequest body, HttpServletRequest request) {
         return ApiResponse.success(
-            Map.of("flowId", 7003L, "flowName", body.flowName(), "operatorCount", body.operatorChain().size()),
+            governanceService.saveFlow(
+                body.flowName(),
+                body.datasetId(),
+                body.operatorChain().stream().map(step -> new GovernanceService.OperatorStepPayload(step.operatorKey(), step.params())).toList(),
+                SecurityUtils.currentUser().userId()
+            ),
             requestId(request)
         );
     }
@@ -41,12 +52,10 @@ public class GovernanceController {
     @PostMapping("/execute")
     public ApiResponse<?> execute(@Valid @RequestBody ExecuteFlowRequest body, HttpServletRequest request) {
         return ApiResponse.success(
-            Map.of(
-                "inputDatasetId", body.datasetId(),
-                "outputDatasetId", 2109L,
-                "operatorCount", body.operatorChain().size(),
-                "logRef", 4009L,
-                "summary", "治理完成，已生成新数据集"
+            governanceService.execute(
+                body.datasetId(),
+                body.operatorChain().stream().map(step -> new GovernanceService.OperatorStepPayload(step.operatorKey(), step.params())).toList(),
+                SecurityUtils.currentUser().userId()
             ),
             requestId(request)
         );
@@ -75,4 +84,3 @@ public class GovernanceController {
     ) {
     }
 }
-
