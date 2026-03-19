@@ -173,6 +173,13 @@ body {
   line-height: 1.8;
 }
 
+.demo-script {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-1);
+  line-height: 1.9;
+}
+
 .notice-box {
   margin-top: 20px;
 }
