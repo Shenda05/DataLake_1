@@ -19,6 +19,8 @@ spring:
   sql:
     init:
       mode: always
+  jackson:
+    time-zone: Asia/Shanghai
 
 springdoc:
   swagger-ui:
@@ -29,7 +31,9 @@ app:
     secret: change-me-for-production-demo-secret-2026
     expire-seconds: 7200
   storage:
-    root: ../storage
+    root: ${APP_STORAGE_ROOT:../storage}
+  task:
+    poll-delay-ms: ${APP_TASK_POLL_DELAY_MS:15000}
 
 mybatis-plus:
   configuration:

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import {
   createTask,
   listGovernanceFlows,
   listImportHistory,
+  listTaskLogs,
   listTasks,
   pauseTask,
   resumeTask,
@@ -12,14 +13,21 @@ import {
   updateTask,
   type GovernanceFlow,
   type ImportHistory,
+  type TaskLogSummary,
   type TaskSummary
 } from '../api/platform';
 
 const tasks = ref<TaskSummary[]>([]);
 const flows = ref<GovernanceFlow[]>([]);
 const importHistory = ref<ImportHistory[]>([]);
+const latestLogs = ref<TaskLogSummary[]>([]);
 const editingTaskId = ref<number | null>(null);
 const loading = ref(false);
+const autoRefreshEnabled = ref(true);
+const refreshSeconds = ref(15);
+const lastSyncedAt = ref('');
+const recentAction = ref<{ type: 'success' | 'info' | 'warning'; message: string } | null>(null);
+let refreshTimer: ReturnType<typeof window.setInterval> | null = null;
 const form = reactive({
   taskName: '',
   taskType: 'GOVERNANCE' as 'IMPORT' | 'GOVERNANCE',
@@ -43,12 +51,36 @@ const targetOptions = computed(() => {
   }));
 });
 
-async function loadData() {
-  tasks.value = await listTasks();
-  flows.value = await listGovernanceFlows();
-  importHistory.value = await listImportHistory();
-  if (!form.targetId && targetOptions.value.length > 0) {
+const enabledCount = computed(() => tasks.value.filter((item) => item.status === 'ENABLED').length);
+const pausedCount = computed(() => tasks.value.filter((item) => item.status === 'PAUSED').length);
+const runningCount = computed(() => tasks.value.filter((item) => item.status === 'RUNNING').length);
+const latestLogByTask = computed(() => {
+  const map = new Map<number, TaskLogSummary>();
+  for (const log of latestLogs.value) {
+    if (log.taskId && !map.has(log.taskId)) {
+      map.set(log.taskId, log);
+    }
+  }
+  return map;
+});
+
+async function loadData(showMessage = false) {
+  const [taskItems, flowItems, importItems, logItems] = await Promise.all([
+    listTasks(),
+    listGovernanceFlows(),
+    listImportHistory(),
+    listTaskLogs()
+  ]);
+  tasks.value = taskItems;
+  flows.value = flowItems;
+  importHistory.value = importItems;
+  latestLogs.value = logItems;
+  if (!form.targetId || !targetOptions.value.some((item) => item.value === form.targetId)) {
     form.targetId = targetOptions.value[0].value;
+  }
+  lastSyncedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  if (showMessage) {
+    ElMessage.success('任务列表已刷新');
   }
 }
 
@@ -92,10 +124,10 @@ async function submit() {
     };
     if (editingTaskId.value) {
       await updateTask(editingTaskId.value, payload);
-      ElMessage.success('任务更新成功');
+      recentAction.value = { type: 'success', message: '任务更新成功，列表已同步最新配置。' };
     } else {
       await createTask(payload);
-      ElMessage.success('任务创建成功');
+      recentAction.value = { type: 'success', message: '任务创建成功，可以立即执行或等待自动调度。' };
     }
     resetForm();
     await loadData();
@@ -109,7 +141,7 @@ async function submit() {
 async function handleTrigger(taskId: number) {
   try {
     const result = await triggerTask(taskId);
-    ElMessage.success(result.message);
+    recentAction.value = { type: result.status === 'FAILED' ? 'warning' : 'success', message: result.message };
     await loadData();
   } catch (error) {
     ElMessage.error(`触发失败: ${(error as Error).message}`);
@@ -119,7 +151,7 @@ async function handleTrigger(taskId: number) {
 async function handlePause(taskId: number) {
   try {
     await pauseTask(taskId);
-    ElMessage.success('任务已暂停');
+    recentAction.value = { type: 'info', message: '任务已暂停，不会继续自动调度。' };
     await loadData();
   } catch (error) {
     ElMessage.error(`暂停失败: ${(error as Error).message}`);
@@ -129,28 +161,120 @@ async function handlePause(taskId: number) {
 async function handleResume(taskId: number) {
   try {
     await resumeTask(taskId);
-    ElMessage.success('任务已恢复');
+    recentAction.value = { type: 'success', message: '任务已恢复，系统会按下次执行时间自动轮询。' };
     await loadData();
   } catch (error) {
     ElMessage.error(`恢复失败: ${(error as Error).message}`);
   }
 }
 
+function latestLog(taskId: number) {
+  return latestLogByTask.value.get(taskId);
+}
+
+function statusTagType(status: string) {
+  switch (status) {
+    case 'SUCCESS':
+      return 'success';
+    case 'FAILED':
+      return 'danger';
+    case 'RUNNING':
+      return 'warning';
+    case 'PAUSED':
+      return 'info';
+    default:
+      return '';
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  if (!autoRefreshEnabled.value) {
+    return;
+  }
+  refreshTimer = window.setInterval(() => {
+    void loadData();
+  }, refreshSeconds.value * 1000);
+}
+
+function stopAutoRefresh() {
+  if (refreshTimer) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+watch([autoRefreshEnabled, refreshSeconds], () => {
+  startAutoRefresh();
+});
+
 onMounted(async () => {
   try {
     await loadData();
-    if (targetOptions.value.length > 0) {
-      form.targetId = targetOptions.value[0].value;
-    }
+    startAutoRefresh();
   } catch (error) {
     ElMessage.error(`任务页初始化失败: ${(error as Error).message}`);
   }
 });
+
+onBeforeUnmount(() => {
+  stopAutoRefresh();
+});
 </script>
 
 <template>
-  <div class="page-grid two-column-grid">
+  <div class="page-grid">
+    <section class="stat-grid">
+      <el-card shadow="hover">
+        <p class="stat-label">启用中任务</p>
+        <p class="stat-value">{{ enabledCount }}</p>
+      </el-card>
+      <el-card shadow="hover">
+        <p class="stat-label">暂停任务</p>
+        <p class="stat-value">{{ pausedCount }}</p>
+      </el-card>
+      <el-card shadow="hover">
+        <p class="stat-label">运行中任务</p>
+        <p class="stat-value">{{ runningCount }}</p>
+      </el-card>
+      <el-card shadow="hover">
+        <p class="stat-label">最近同步时间</p>
+        <p class="stat-value task-sync-time">{{ lastSyncedAt || '--:--:--' }}</p>
+      </el-card>
+    </section>
+
     <el-card shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>调度面板</span>
+          <div class="task-toolbar">
+            <span class="stat-label">自动刷新</span>
+            <el-switch v-model="autoRefreshEnabled" />
+            <el-select v-model="refreshSeconds" class="refresh-select">
+              <el-option label="10 秒" :value="10" />
+              <el-option label="15 秒" :value="15" />
+              <el-option label="30 秒" :value="30" />
+            </el-select>
+            <el-button link type="primary" @click="loadData(true)">立即刷新</el-button>
+          </div>
+        </div>
+      </template>
+      <el-alert
+        :title="autoRefreshEnabled ? `自动刷新已开启，每 ${refreshSeconds} 秒拉取一次任务与日志结果` : '自动刷新已关闭，可手动刷新获取最新结果'"
+        type="info"
+        :closable="false"
+      />
+      <el-alert
+        v-if="recentAction"
+        class="notice-box"
+        :title="recentAction.message"
+        :type="recentAction.type"
+        :closable="false"
+      />
+    </el-card>
+
+    <section class="two-column-grid">
+      <el-card shadow="never">
       <template #header>
         <div class="card-header">
           <span>{{ editingTaskId ? '编辑任务' : '新建任务' }}</span>
@@ -204,20 +328,36 @@ onMounted(async () => {
         type="info"
         :closable="false"
       />
-    </el-card>
+      </el-card>
 
-    <el-card shadow="never">
+      <el-card shadow="never">
       <template #header>
         <div class="card-header">
           <span>任务调度列表</span>
-          <el-button link type="primary" @click="loadData">刷新</el-button>
+          <el-tag type="success">实时结果</el-tag>
         </div>
       </template>
       <el-table :data="tasks" stripe @row-click="loadTask">
         <el-table-column prop="taskName" label="任务名称" />
         <el-table-column prop="taskType" label="类型" width="120" />
         <el-table-column prop="targetName" label="执行目标" />
-        <el-table-column prop="status" label="状态" width="120" />
+        <el-table-column label="调度状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="最近执行结果" width="140">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(latestLog(row.taskId)?.status || '')">
+              {{ latestLog(row.taskId)?.status || '暂无记录' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="最近结果摘要">
+          <template #default="{ row }">
+            {{ latestLog(row.taskId)?.executionSummary || latestLog(row.taskId)?.errorMessage || '等待首次执行' }}
+          </template>
+        </el-table-column>
         <el-table-column prop="nextRunTime" label="下次执行时间" width="180" />
         <el-table-column prop="lastRunTime" label="最近执行时间" width="180" />
         <el-table-column label="操作" width="240">
@@ -228,6 +368,7 @@ onMounted(async () => {
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+      </el-card>
+    </section>
   </div>
 </template>

@@ -60,6 +60,36 @@ env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Conte
 env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home' PATH='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home/bin':$PATH mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 ```
 
+推荐先准备 MySQL 库和字符集：
+
+```sql
+CREATE DATABASE IF NOT EXISTS data_lake_platform
+  DEFAULT CHARACTER SET utf8mb4
+  DEFAULT COLLATE utf8mb4_general_ci;
+```
+
+然后执行建表脚本：
+
+```bash
+/usr/local/mysql/bin/mysql -uroot -proot --default-character-set=utf8mb4 data_lake_platform < database/schema.sql
+```
+
+如果你不想把账号密码写死在配置里，可以用环境变量覆盖：
+
+```bash
+export MYSQL_URL='jdbc:mysql://127.0.0.1:3306/data_lake_platform?useUnicode=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true'
+export MYSQL_USERNAME='root'
+export MYSQL_PASSWORD='root'
+export APP_STORAGE_ROOT='/absolute/path/to/DataLake/storage'
+export APP_TASK_POLL_DELAY_MS='15000'
+```
+
+MySQL 联调时建议重点确认三件事：
+
+1. 时区：数据库、JDBC URL 和应用输出都统一到 `Asia/Shanghai`。
+2. 字符集：数据库和导入终端都使用 `utf8mb4`，避免中文字段或日志摘要乱码。
+3. 存储路径：`APP_STORAGE_ROOT` 尽量配置为稳定的绝对路径，避免相对路径随着启动目录变化。
+
 ## 目录结构
 
 ```text
@@ -104,6 +134,7 @@ env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Conte
 3. 任务类型选 `IMPORT` 时，目标选择已有导入历史记录。
 4. 填写 `Cron` 表达式，例如 `0 */5 * * * *`。
 5. 创建后可以点击“立即执行”，也可以保留给轮询调度器自动执行。
+6. 当前任务页已支持自动刷新和最近执行结果提示，适合现场观察状态变化。
 
 ### 4. 查看日志与首页汇总
 
@@ -121,6 +152,6 @@ env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Conte
 
 ## 下一步建议
 
-- 在 MySQL 环境补一轮完整联调，确认时区、字符集和文件存储路径。
-- 为任务页补自动刷新和最近执行结果提示，方便演示定时执行效果。
 - 继续补充用户权限编辑、数据库表导入和 Excel 导出等 P1 能力。
+- 为首页和日志页补更多跨模块跳转入口，进一步压缩答辩演示路径。
+- 如果需要稳定展示定时执行结果，可以补一个“最近 1 分钟任务事件流”组件。
