@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { getTaskLogDetail, listTaskLogs, type TaskLogDetail, type TaskLogSummary } from '../api/platform';
 
+const LOG_FILTERS_KEY = 'data-lake-log-filters';
 const route = useRoute();
 const router = useRouter();
 const logs = ref<TaskLogSummary[]>([]);
@@ -38,21 +39,28 @@ const avgDuration = computed(() => {
   return Math.round(logs.value.reduce((sum, item) => sum + (item.duration || 0), 0) / logs.value.length);
 });
 
+restoreFilters();
+
 async function loadData() {
   logs.value = await listTaskLogs();
   lastSyncedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false });
   const queryLogId = Number(route.query.logId);
   if (Number.isInteger(queryLogId) && queryLogId > 0 && logs.value.some((item) => item.logId === queryLogId)) {
-    await selectLog(queryLogId);
+    await selectLog(queryLogId, false);
+  } else if (selectedLog.value && logs.value.some((item) => item.logId === selectedLog.value?.logId)) {
+    await selectLog(selectedLog.value.logId, false);
   } else if (logs.value.length > 0) {
-    await selectLog(logs.value[0].logId);
+    await selectLog(logs.value[0].logId, false);
   } else {
     selectedLog.value = null;
   }
 }
 
-async function selectLog(logId: number) {
+async function selectLog(logId: number, syncRoute = true) {
   selectedLog.value = await getTaskLogDetail(logId);
+  if (syncRoute) {
+    syncRouteState({ logId: String(logId) });
+  }
 }
 
 function statusTagType(status: string) {
@@ -104,12 +112,105 @@ function goToTarget(log?: TaskLogSummary | TaskLogDetail | null) {
   }
 }
 
+function getQueryValue(key: string) {
+  const value = route.query[key];
+  return Array.isArray(value) ? value[0] || '' : typeof value === 'string' ? value : '';
+}
+
+function restoreFilters() {
+  const queryKeyword = getQueryValue('keyword');
+  const queryStatus = getQueryValue('status');
+  const queryTaskType = getQueryValue('taskType');
+  const stored = localStorage.getItem(LOG_FILTERS_KEY);
+  let parsed: { keyword?: string; status?: string; taskType?: string } = {};
+  if (stored) {
+    try {
+      parsed = JSON.parse(stored) as { keyword?: string; status?: string; taskType?: string };
+    } catch {
+      localStorage.removeItem(LOG_FILTERS_KEY);
+    }
+  }
+  filters.keyword = queryKeyword || parsed.keyword || '';
+  filters.status = queryStatus || parsed.status || '';
+  filters.taskType = queryTaskType || parsed.taskType || '';
+}
+
+function persistFilters() {
+  localStorage.setItem(
+    LOG_FILTERS_KEY,
+    JSON.stringify({
+      keyword: filters.keyword,
+      status: filters.status,
+      taskType: filters.taskType
+    })
+  );
+}
+
+function syncRouteState(patch: Record<string, string>) {
+  const nextQuery = {
+    ...route.query,
+    ...patch
+  } as Record<string, string>;
+  for (const key of Object.keys(nextQuery)) {
+    if (!nextQuery[key]) {
+      delete nextQuery[key];
+    }
+  }
+  void router.replace({ query: nextQuery });
+}
+
+function buildCsv(rows: TaskLogSummary[]) {
+  const headers = ['logId', 'taskId', 'taskName', 'taskType', 'targetId', 'status', 'startTime', 'endTime', 'duration', 'executionSummary', 'errorMessage'];
+  return [headers.join(','), ...rows.map((row) =>
+    headers
+      .map((header) => {
+        const value = row[header as keyof TaskLogSummary] == null ? '' : String(row[header as keyof TaskLogSummary]);
+        const escaped = value.replace(/"/g, '""');
+        return escaped.includes(',') || escaped.includes('"') || escaped.includes('\n') ? `"${escaped}"` : escaped;
+      })
+      .join(',')
+  )].join('\n');
+}
+
+function exportLogs(format: 'csv' | 'json') {
+  if (!filteredLogs.value.length) {
+    ElMessage.warning('当前筛选结果为空，暂无可导出的日志');
+    return;
+  }
+  const filename = `task-logs-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${format}`;
+  const blob =
+    format === 'json'
+      ? new Blob([JSON.stringify(filteredLogs.value, null, 2)], { type: 'application/json' })
+      : new Blob([buildCsv(filteredLogs.value)], { type: 'text/csv;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+  ElMessage.success(`已导出 ${filteredLogs.value.length} 条日志为 ${format.toUpperCase()}`);
+}
+
+watch(
+  () => [filters.keyword, filters.status, filters.taskType],
+  () => {
+    persistFilters();
+    syncRouteState({
+      keyword: filters.keyword,
+      status: filters.status,
+      taskType: filters.taskType
+    });
+  }
+);
+
 watch(
   () => route.query.logId,
   async (value) => {
     const logId = Number(value);
     if (Number.isInteger(logId) && logId > 0 && logs.value.some((item) => item.logId === logId)) {
-      await selectLog(logId);
+      await selectLog(logId, false);
     }
   }
 );
@@ -155,6 +256,9 @@ onMounted(async () => {
             <span>日志筛选</span>
             <div class="card-header-actions">
               <span class="inline-tip">最近同步 {{ lastSyncedAt || '--:--:--' }}</span>
+              <span class="inline-tip">已记忆筛选条件并同步到地址栏</span>
+              <el-button link type="primary" @click="exportLogs('csv')">导出 CSV</el-button>
+              <el-button link type="primary" @click="exportLogs('json')">导出 JSON</el-button>
               <el-button link type="primary" @click="resetFilters">重置</el-button>
               <el-button link type="primary" @click="loadData">刷新</el-button>
               <el-button link type="primary" @click="goToDashboard">回首页</el-button>
@@ -189,6 +293,7 @@ onMounted(async () => {
           <span>任务日志</span>
           <div class="card-header-actions">
             <el-tag type="success">实时列表</el-tag>
+            <span class="inline-tip">当前筛选结果 {{ filteredLogs.length }} 条</span>
             <el-button link type="primary" @click="goToTasks(selectedLog)">查看对应任务</el-button>
           </div>
         </div>

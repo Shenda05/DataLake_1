@@ -239,6 +239,11 @@ body {
   flex-wrap: wrap;
 }
 
+.filter-summary {
+  color: var(--ink-1);
+  font-size: 14px;
+}
+
 .refresh-select {
   width: 110px;
 }

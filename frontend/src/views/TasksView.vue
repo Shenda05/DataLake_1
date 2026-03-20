@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   createTask,
   listGovernanceFlows,
@@ -18,7 +18,9 @@ import {
   type TaskSummary
 } from '../api/platform';
 
+const TASK_FILTERS_KEY = 'data-lake-task-filters';
 const route = useRoute();
+const router = useRouter();
 const tasks = ref<TaskSummary[]>([]);
 const flows = ref<GovernanceFlow[]>([]);
 const importHistory = ref<ImportHistory[]>([]);
@@ -30,6 +32,11 @@ const refreshSeconds = ref(15);
 const lastSyncedAt = ref('');
 const recentAction = ref<{ type: 'success' | 'info' | 'warning'; message: string } | null>(null);
 let refreshTimer: ReturnType<typeof window.setInterval> | null = null;
+const filters = reactive({
+  keyword: '',
+  status: '',
+  taskType: ''
+});
 const form = reactive({
   taskName: '',
   taskType: 'GOVERNANCE' as 'IMPORT' | 'GOVERNANCE',
@@ -53,6 +60,18 @@ const targetOptions = computed(() => {
   }));
 });
 
+const filteredTasks = computed(() =>
+  tasks.value.filter((item) => {
+    const matchesKeyword =
+      !filters.keyword ||
+      [item.taskName, item.targetName, item.description, item.taskType]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(filters.keyword.toLowerCase()));
+    const matchesStatus = !filters.status || item.status === filters.status;
+    const matchesTaskType = !filters.taskType || item.taskType === filters.taskType;
+    return matchesKeyword && matchesStatus && matchesTaskType;
+  })
+);
 const enabledCount = computed(() => tasks.value.filter((item) => item.status === 'ENABLED').length);
 const pausedCount = computed(() => tasks.value.filter((item) => item.status === 'PAUSED').length);
 const runningCount = computed(() => tasks.value.filter((item) => item.status === 'RUNNING').length);
@@ -65,6 +84,8 @@ const latestLogByTask = computed(() => {
   }
   return map;
 });
+
+restoreFilters();
 
 async function loadData(showMessage = false) {
   const [taskItems, flowItems, importItems, logItems] = await Promise.all([
@@ -81,7 +102,7 @@ async function loadData(showMessage = false) {
   if (Number.isInteger(routeTaskId) && routeTaskId > 0) {
     const matchedTask = tasks.value.find((item) => item.taskId === routeTaskId);
     if (matchedTask) {
-      loadTask(matchedTask);
+      loadTask(matchedTask, false);
     }
   }
   if (!form.targetId || !targetOptions.value.some((item) => item.value === form.targetId)) {
@@ -104,7 +125,7 @@ function resetForm() {
   form.status = 'ENABLED';
 }
 
-function loadTask(task: TaskSummary) {
+function loadTask(task: TaskSummary, syncRoute = true) {
   editingTaskId.value = task.taskId;
   form.taskName = task.taskName;
   form.taskType = task.taskType;
@@ -113,6 +134,9 @@ function loadTask(task: TaskSummary) {
   form.retryPolicy = task.retryPolicy;
   form.description = task.description || '';
   form.status = task.status === 'PAUSED' ? 'PAUSED' : 'ENABLED';
+  if (syncRoute) {
+    syncRouteState({ taskId: String(task.taskId) });
+  }
 }
 
 async function submit() {
@@ -181,6 +205,10 @@ function latestLog(taskId: number) {
   return latestLogByTask.value.get(taskId);
 }
 
+function formatTaskType(taskType: string) {
+  return taskType === 'GOVERNANCE' ? '治理任务' : taskType === 'IMPORT' ? '导入任务' : taskType;
+}
+
 function statusTagType(status: string) {
   switch (status) {
     case 'SUCCESS':
@@ -194,6 +222,59 @@ function statusTagType(status: string) {
     default:
       return '';
   }
+}
+
+function getQueryValue(key: string) {
+  const value = route.query[key];
+  return Array.isArray(value) ? value[0] || '' : typeof value === 'string' ? value : '';
+}
+
+function restoreFilters() {
+  const queryKeyword = getQueryValue('keyword');
+  const queryStatus = getQueryValue('status');
+  const queryTaskType = getQueryValue('taskType');
+  const stored = localStorage.getItem(TASK_FILTERS_KEY);
+  let parsed: { keyword?: string; status?: string; taskType?: string } = {};
+  if (stored) {
+    try {
+      parsed = JSON.parse(stored) as { keyword?: string; status?: string; taskType?: string };
+    } catch {
+      localStorage.removeItem(TASK_FILTERS_KEY);
+    }
+  }
+  filters.keyword = queryKeyword || parsed.keyword || '';
+  filters.status = queryStatus || parsed.status || '';
+  filters.taskType = queryTaskType || parsed.taskType || '';
+}
+
+function persistFilters() {
+  localStorage.setItem(
+    TASK_FILTERS_KEY,
+    JSON.stringify({
+      keyword: filters.keyword,
+      status: filters.status,
+      taskType: filters.taskType
+    })
+  );
+}
+
+function syncRouteState(patch: Record<string, string>) {
+  const nextQuery = {
+    ...route.query,
+    ...patch
+  } as Record<string, string>;
+  for (const key of Object.keys(nextQuery)) {
+    if (!nextQuery[key]) {
+      delete nextQuery[key];
+    }
+  }
+  void router.replace({ query: nextQuery });
+}
+
+function resetFilters() {
+  filters.keyword = '';
+  filters.status = '';
+  filters.taskType = '';
 }
 
 function startAutoRefresh() {
@@ -218,13 +299,25 @@ watch([autoRefreshEnabled, refreshSeconds], () => {
 });
 
 watch(
+  () => [filters.keyword, filters.status, filters.taskType],
+  () => {
+    persistFilters();
+    syncRouteState({
+      keyword: filters.keyword,
+      status: filters.status,
+      taskType: filters.taskType
+    });
+  }
+);
+
+watch(
   () => route.query.taskId,
   (value) => {
     const taskId = Number(value);
     if (Number.isInteger(taskId) && taskId > 0) {
       const matchedTask = tasks.value.find((item) => item.taskId === taskId);
       if (matchedTask) {
-        loadTask(matchedTask);
+        loadTask(matchedTask, false);
       }
     }
   }
@@ -295,6 +388,42 @@ onBeforeUnmount(() => {
       />
     </el-card>
 
+    <el-card shadow="never">
+      <template #header>
+        <div class="card-header">
+          <span>任务筛选</span>
+          <div class="card-header-actions">
+            <span class="inline-tip">已记忆上次筛选条件，刷新或重新进入页面后会自动回填。</span>
+            <el-button link type="primary" @click="resetFilters">重置筛选</el-button>
+          </div>
+        </div>
+      </template>
+      <el-form inline>
+        <el-form-item label="关键字">
+          <el-input v-model="filters.keyword" placeholder="任务名 / 目标 / 说明" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="filters.status" clearable placeholder="全部状态">
+            <el-option label="ENABLED" value="ENABLED" />
+            <el-option label="PAUSED" value="PAUSED" />
+            <el-option label="RUNNING" value="RUNNING" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="类型">
+          <el-select v-model="filters.taskType" clearable placeholder="全部类型">
+            <el-option label="GOVERNANCE" value="GOVERNANCE" />
+            <el-option label="IMPORT" value="IMPORT" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <el-alert
+        class="notice-box"
+        :title="`当前显示 ${filteredTasks.length} / ${tasks.length} 条任务，选中任务会同步写入地址栏，便于从日志页一键回填。`"
+        type="info"
+        :closable="false"
+      />
+    </el-card>
+
     <section class="two-column-grid">
       <el-card shadow="never">
       <template #header>
@@ -356,12 +485,19 @@ onBeforeUnmount(() => {
       <template #header>
         <div class="card-header">
           <span>任务调度列表</span>
-          <el-tag type="success">实时结果</el-tag>
+          <div class="card-header-actions">
+            <el-tag type="success">实时结果</el-tag>
+            <span class="inline-tip">当前筛选结果 {{ filteredTasks.length }} 条</span>
+          </div>
         </div>
       </template>
-      <el-table :data="tasks" stripe @row-click="loadTask">
+      <el-table :data="filteredTasks" stripe @row-click="(row: TaskSummary) => loadTask(row)">
         <el-table-column prop="taskName" label="任务名称" />
-        <el-table-column prop="taskType" label="类型" width="120" />
+        <el-table-column label="类型" width="120">
+          <template #default="{ row }">
+            {{ formatTaskType(row.taskType) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="targetName" label="执行目标" />
         <el-table-column label="调度状态" width="120">
           <template #default="{ row }">
