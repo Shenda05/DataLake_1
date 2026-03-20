@@ -13,7 +13,27 @@ const lastSyncedAt = ref('');
 const filters = reactive({
   keyword: '',
   status: '',
-  taskType: ''
+  taskType: '',
+  targetId: '',
+  timeRange: [] as string[],
+  failedOnly: false
+});
+
+const logTargetOptions = computed(() => {
+  const map = new Map<string, { value: string; label: string }>();
+  for (const item of logs.value) {
+    if (item.targetId == null) {
+      continue;
+    }
+    const key = String(item.targetId);
+    if (!map.has(key)) {
+      map.set(key, {
+        value: key,
+        label: `${item.taskName} / ${formatTaskType(item.taskType)} / 目标 ${item.targetId}`
+      });
+    }
+  }
+  return Array.from(map.values());
 });
 
 const filteredLogs = computed(() =>
@@ -25,7 +45,10 @@ const filteredLogs = computed(() =>
         .some((value) => String(value).toLowerCase().includes(filters.keyword.toLowerCase()));
     const matchesStatus = !filters.status || log.status === filters.status;
     const matchesTaskType = !filters.taskType || log.taskType === filters.taskType;
-    return matchesKeyword && matchesStatus && matchesTaskType;
+    const matchesTarget = !filters.targetId || String(log.targetId ?? '') === filters.targetId;
+    const matchesTimeRange = matchesDateRange(log.startTime || log.endTime, filters.timeRange);
+    const matchesRecentFailed = !filters.failedOnly || isRecentFailed(log);
+    return matchesKeyword && matchesStatus && matchesTaskType && matchesTarget && matchesTimeRange && matchesRecentFailed;
   })
 );
 
@@ -38,6 +61,7 @@ const avgDuration = computed(() => {
   }
   return Math.round(logs.value.reduce((sum, item) => sum + (item.duration || 0), 0) / logs.value.length);
 });
+const recentFailedCount = computed(() => logs.value.filter((item) => isRecentFailed(item)).length);
 
 restoreFilters();
 
@@ -82,6 +106,9 @@ function resetFilters() {
   filters.keyword = '';
   filters.status = '';
   filters.taskType = '';
+  filters.targetId = '';
+  filters.timeRange = [];
+  filters.failedOnly = false;
 }
 
 function formatTaskType(taskType: string) {
@@ -117,15 +144,49 @@ function getQueryValue(key: string) {
   return Array.isArray(value) ? value[0] || '' : typeof value === 'string' ? value : '';
 }
 
+function toTimestamp(value?: string | null, endOfDay = false) {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.length === 10 ? `${value}${endOfDay ? 'T23:59:59' : 'T00:00:00'}` : value;
+  const timestamp = new Date(normalized).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function matchesDateRange(value?: string | null, range: string[] = []) {
+  if (!range.length || (!range[0] && !range[1])) {
+    return true;
+  }
+  const valueTime = toTimestamp(value);
+  if (valueTime === null) {
+    return false;
+  }
+  const start = toTimestamp(range[0]);
+  const end = toTimestamp(range[1], true);
+  return (start === null || valueTime >= start) && (end === null || valueTime <= end);
+}
+
+function isRecentFailed(log?: TaskLogSummary | null) {
+  if (!log || log.status !== 'FAILED') {
+    return false;
+  }
+  const timestamp = toTimestamp(log.startTime || log.endTime);
+  return timestamp !== null && Date.now() - timestamp <= 7 * 24 * 60 * 60 * 1000;
+}
+
 function restoreFilters() {
   const queryKeyword = getQueryValue('keyword');
   const queryStatus = getQueryValue('status');
   const queryTaskType = getQueryValue('taskType');
+  const queryTargetId = getQueryValue('targetId');
+  const queryStartDate = getQueryValue('startDate');
+  const queryEndDate = getQueryValue('endDate');
+  const queryFailedOnly = getQueryValue('failedOnly');
   const stored = localStorage.getItem(LOG_FILTERS_KEY);
-  let parsed: { keyword?: string; status?: string; taskType?: string } = {};
+  let parsed: { keyword?: string; status?: string; taskType?: string; targetId?: string; timeRange?: string[]; failedOnly?: boolean } = {};
   if (stored) {
     try {
-      parsed = JSON.parse(stored) as { keyword?: string; status?: string; taskType?: string };
+      parsed = JSON.parse(stored) as { keyword?: string; status?: string; taskType?: string; targetId?: string; timeRange?: string[]; failedOnly?: boolean };
     } catch {
       localStorage.removeItem(LOG_FILTERS_KEY);
     }
@@ -133,6 +194,14 @@ function restoreFilters() {
   filters.keyword = queryKeyword || parsed.keyword || '';
   filters.status = queryStatus || parsed.status || '';
   filters.taskType = queryTaskType || parsed.taskType || '';
+  filters.targetId = queryTargetId || parsed.targetId || '';
+  filters.timeRange =
+    queryStartDate || queryEndDate
+      ? [queryStartDate, queryEndDate].filter(Boolean)
+      : Array.isArray(parsed.timeRange)
+        ? parsed.timeRange
+        : [];
+  filters.failedOnly = queryFailedOnly === '1' || parsed.failedOnly || false;
 }
 
 function persistFilters() {
@@ -141,7 +210,10 @@ function persistFilters() {
     JSON.stringify({
       keyword: filters.keyword,
       status: filters.status,
-      taskType: filters.taskType
+      taskType: filters.taskType,
+      targetId: filters.targetId,
+      timeRange: filters.timeRange,
+      failedOnly: filters.failedOnly
     })
   );
 }
@@ -194,13 +266,17 @@ function exportLogs(format: 'csv' | 'json') {
 }
 
 watch(
-  () => [filters.keyword, filters.status, filters.taskType],
+  () => [filters.keyword, filters.status, filters.taskType, filters.targetId, filters.timeRange[0], filters.timeRange[1], String(filters.failedOnly)],
   () => {
     persistFilters();
     syncRouteState({
       keyword: filters.keyword,
       status: filters.status,
-      taskType: filters.taskType
+      taskType: filters.taskType,
+      targetId: filters.targetId,
+      startDate: filters.timeRange[0] || '',
+      endDate: filters.timeRange[1] || '',
+      failedOnly: filters.failedOnly ? '1' : ''
     });
   }
 );
@@ -247,6 +323,11 @@ onMounted(async () => {
         <p class="stat-value">{{ avgDuration }}s</p>
         <el-button link type="primary" @click="goToTarget(selectedLog)">查看来源模块</el-button>
       </el-card>
+      <el-card shadow="hover">
+        <p class="stat-label">近 7 天失败日志</p>
+        <p class="stat-value">{{ recentFailedCount }}</p>
+        <el-button link type="primary" @click="filters.failedOnly = true">快速筛选</el-button>
+      </el-card>
     </section>
 
     <section class="two-column-grid">
@@ -282,7 +363,37 @@ onMounted(async () => {
               <el-option label="GOVERNANCE" value="GOVERNANCE" />
             </el-select>
           </el-form-item>
+          <el-form-item label="执行目标">
+            <el-select v-model="filters.targetId" clearable placeholder="全部目标">
+              <el-option
+                v-for="item in logTargetOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="执行时间">
+            <el-date-picker
+              v-model="filters.timeRange"
+              class="filter-range"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              value-format="YYYY-MM-DD"
+            />
+          </el-form-item>
+          <el-form-item label="快速筛选">
+            <el-checkbox v-model="filters.failedOnly">仅看近 7 天失败</el-checkbox>
+          </el-form-item>
         </el-form>
+        <el-alert
+          class="notice-box"
+          :title="`当前显示 ${filteredLogs.length} / ${logs.length} 条日志，目标、时间范围和近 7 天失败筛选都会被记忆。`"
+          type="info"
+          :closable="false"
+        />
       </el-card>
     </section>
 
