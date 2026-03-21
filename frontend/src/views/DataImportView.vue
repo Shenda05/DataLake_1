@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { isAuthExpiredError } from '../api/client';
 import { importFile, listDataSources, listImportHistory, type DataSource, type ImportHistory } from '../api/platform';
 
 const dataSources = ref<DataSource[]>([]);
@@ -52,6 +53,9 @@ onMounted(async () => {
   try {
     await loadBaseData();
   } catch (error) {
+    if (isAuthExpiredError(error)) {
+      return;
+    }
     ElMessage.error(`导入页初始化失败: ${(error as Error).message}`);
   }
 });

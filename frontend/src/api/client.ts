@@ -1,6 +1,9 @@
 import axios from 'axios';
 
 const TOKEN_KEY = 'data-lake-auth-token';
+const PROFILE_KEY = 'data-lake-auth-profile';
+const AUTH_EXPIRED_MESSAGE = '登录已失效，请重新登录';
+let redirectingToLogin = false;
 
 type ApiEnvelope<T> = {
   code: number;
@@ -15,6 +18,36 @@ const client = axios.create({
   timeout: 20000
 });
 
+function clearStoredAuth() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(PROFILE_KEY);
+}
+
+function createAuthExpiredError() {
+  const error = new Error(AUTH_EXPIRED_MESSAGE);
+  error.name = 'AuthExpiredError';
+  return error;
+}
+
+function handleAuthExpired() {
+  clearStoredAuth();
+  if (typeof window === 'undefined') {
+    return;
+  }
+  if (window.location.pathname === '/login' || redirectingToLogin) {
+    return;
+  }
+  redirectingToLogin = true;
+  window.setTimeout(() => {
+    window.location.replace('/login');
+    redirectingToLogin = false;
+  }, 0);
+}
+
+export function isAuthExpiredError(error: unknown) {
+  return error instanceof Error && error.name === 'AuthExpiredError';
+}
+
 client.interceptors.request.use((config) => {
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
@@ -26,6 +59,12 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   (response) => response,
   (error) => {
+    const status = error?.response?.status;
+    const requestUrl = String(error?.config?.url || '');
+    if (status === 401 && !requestUrl.includes('/auth/login')) {
+      handleAuthExpired();
+      return Promise.reject(createAuthExpiredError());
+    }
     const message = error?.response?.data?.message || error?.message || '请求失败';
     return Promise.reject(new Error(message));
   }

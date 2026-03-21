@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { isAuthExpiredError } from '../api/client';
 import {
   exportDataset,
   getDatasetDetail,
@@ -95,6 +96,9 @@ onMounted(async () => {
   try {
     await loadDatasets();
   } catch (error) {
+    if (isAuthExpiredError(error)) {
+      return;
+    }
     ElMessage.error(`数据集加载失败: ${(error as Error).message}`);
   }
 });

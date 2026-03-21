@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import * as echarts from 'echarts';
 import { useRouter } from 'vue-router';
+import { isAuthExpiredError } from '../api/client';
 import { getOverview, getRecentTasks, getTaskTrend, listTaskLogs, type TaskLogSummary } from '../api/platform';
 
 const router = useRouter();
@@ -186,6 +187,9 @@ onMounted(async () => {
     await loadData();
     startAutoRefresh();
   } catch (error) {
+    if (isAuthExpiredError(error)) {
+      return;
+    }
     ElMessage.error(`首页数据加载失败: ${(error as Error).message}`);
   }
 });

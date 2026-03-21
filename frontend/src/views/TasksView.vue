@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
+import { isAuthExpiredError } from '../api/client';
 import {
   createTask,
   listGovernanceFlows,
@@ -407,6 +408,9 @@ onMounted(async () => {
     await loadData();
     startAutoRefresh();
   } catch (error) {
+    if (isAuthExpiredError(error)) {
+      return;
+    }
     ElMessage.error(`任务页初始化失败: ${(error as Error).message}`);
   }
 });

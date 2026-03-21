@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import * as echarts from 'echarts';
+import { isAuthExpiredError } from '../api/client';
 import {
   filterQuery,
   getAnalysisCharts,
@@ -143,6 +144,9 @@ onMounted(async () => {
   try {
     await loadBaseData();
   } catch (error) {
+    if (isAuthExpiredError(error)) {
+      return;
+    }
     ElMessage.error(`查询页初始化失败: ${(error as Error).message}`);
   }
 });

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { isAuthExpiredError } from '../api/client';
 import { createDataSource, deleteDataSource, listDataSources, testDataSource, type DataSource } from '../api/platform';
 
 const dataSources = ref<DataSource[]>([]);
@@ -57,6 +58,9 @@ onMounted(async () => {
   try {
     await loadData();
   } catch (error) {
+    if (isAuthExpiredError(error)) {
+      return;
+    }
     ElMessage.error(`数据源加载失败: ${(error as Error).message}`);
   }
 });

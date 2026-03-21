@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
+import { isAuthExpiredError } from '../api/client';
 import {
   createGovernanceFlow,
   executeGovernanceFlow,
@@ -141,6 +142,9 @@ onMounted(async () => {
   try {
     await loadData();
   } catch (error) {
+    if (isAuthExpiredError(error)) {
+      return;
+    }
     ElMessage.error(`治理页初始化失败: ${(error as Error).message}`);
   }
 });

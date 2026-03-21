@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
+import { isAuthExpiredError } from '../api/client';
 import { getTaskLogDetail, listTaskLogs, type TaskLogDetail, type TaskLogSummary } from '../api/platform';
 
 const LOG_FILTERS_KEY = 'data-lake-log-filters';
@@ -295,6 +296,9 @@ onMounted(async () => {
   try {
     await loadData();
   } catch (error) {
+    if (isAuthExpiredError(error)) {
+      return;
+    }
     ElMessage.error(`日志页初始化失败: ${(error as Error).message}`);
   }
 });
