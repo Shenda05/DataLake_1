@@ -18,6 +18,7 @@ import {
   type TaskLogSummary,
   type TaskSummary
 } from '../api/platform';
+import { useAuthStore } from '../stores/auth';
 
 const TASK_FILTERS_KEY = 'data-lake-task-filters';
 const TASK_FILTER_VIEWS_KEY = 'data-lake-task-filter-views';
@@ -36,6 +37,7 @@ type SavedTaskFilterView = {
 };
 const route = useRoute();
 const router = useRouter();
+const authStore = useAuthStore();
 const tasks = ref<TaskSummary[]>([]);
 const flows = ref<GovernanceFlow[]>([]);
 const importHistory = ref<ImportHistory[]>([]);
@@ -84,6 +86,20 @@ const hasTargetOptions = computed(() => targetOptions.value.length > 0);
 const targetEmptyTip = computed(() =>
   form.taskType === 'IMPORT' ? '当前还没有可用的导入历史，请先到“数据接入”完成一次导入。' : '当前还没有可用的治理流程，请先到“数据治理”保存一个流程。'
 );
+const canManageTasks = computed(() => authStore.hasAction('task.manage'));
+const canTriggerTasks = computed(() => authStore.hasAction('task.trigger'));
+const taskPermissionHint = computed(() => {
+  if (canManageTasks.value && canTriggerTasks.value) {
+    return '';
+  }
+  if (canTriggerTasks.value) {
+    return '当前角色可查看并立即执行任务，但不能创建、修改、暂停或恢复任务配置。';
+  }
+  if (canManageTasks.value) {
+    return '当前角色可维护任务配置，但不能立即触发任务。';
+  }
+  return '当前角色只有任务查看权限，不能编辑任务，也不能手动触发任务。';
+});
 
 const taskTargetOptions = computed(() => {
   const map = new Map<string, { value: string; label: string }>();
@@ -190,6 +206,10 @@ function loadTask(task: TaskSummary, syncRoute = true) {
 }
 
 async function submit() {
+  if (!canManageTasks.value) {
+    ElMessage.warning('当前角色没有任务配置权限');
+    return;
+  }
   if (!hasTargetOptions.value) {
     ElMessage.warning(targetEmptyTip.value);
     return;
@@ -226,6 +246,10 @@ async function submit() {
 }
 
 async function handleTrigger(taskId: number) {
+  if (!canTriggerTasks.value) {
+    ElMessage.warning('当前角色没有任务触发权限');
+    return;
+  }
   try {
     const result = await triggerTask(taskId);
     recentAction.value = { type: result.status === 'FAILED' ? 'warning' : 'success', message: result.message };
@@ -236,6 +260,10 @@ async function handleTrigger(taskId: number) {
 }
 
 async function handlePause(taskId: number) {
+  if (!canManageTasks.value) {
+    ElMessage.warning('当前角色没有任务配置权限');
+    return;
+  }
   try {
     await pauseTask(taskId);
     recentAction.value = { type: 'info', message: '任务已暂停，不会继续自动调度。' };
@@ -246,6 +274,10 @@ async function handlePause(taskId: number) {
 }
 
 async function handleResume(taskId: number) {
+  if (!canManageTasks.value) {
+    ElMessage.warning('当前角色没有任务配置权限');
+    return;
+  }
   try {
     await resumeTask(taskId);
     recentAction.value = { type: 'success', message: '任务已恢复，系统会按下次执行时间自动轮询。' };
@@ -582,6 +614,13 @@ onBeforeUnmount(() => {
         :type="recentAction.type"
         :closable="false"
       />
+      <el-alert
+        v-if="taskPermissionHint"
+        class="notice-box"
+        :title="taskPermissionHint"
+        type="warning"
+        :closable="false"
+      />
     </el-card>
 
     <el-card shadow="never">
@@ -665,7 +704,7 @@ onBeforeUnmount(() => {
           <span>{{ editingTaskId ? '编辑任务' : '新建任务' }}</span>
           <div>
             <el-button link type="primary" @click="resetForm">重置</el-button>
-            <el-button type="primary" :loading="loading" @click="submit">
+            <el-button type="primary" :loading="loading" :disabled="!canManageTasks" @click="submit">
               {{ editingTaskId ? '保存修改' : '创建任务' }}
             </el-button>
           </div>
@@ -673,16 +712,16 @@ onBeforeUnmount(() => {
       </template>
       <el-form label-position="top">
         <el-form-item label="任务名称">
-          <el-input v-model="form.taskName" placeholder="例如 每日治理流程执行" />
+          <el-input v-model="form.taskName" placeholder="例如 每日治理流程执行" :disabled="!canManageTasks" />
         </el-form-item>
         <el-form-item label="任务类型">
-          <el-select v-model="form.taskType" @change="form.targetId = targetOptions[0]?.value">
+          <el-select v-model="form.taskType" :disabled="!canManageTasks" @change="form.targetId = targetOptions[0]?.value">
             <el-option label="GOVERNANCE" value="GOVERNANCE" />
             <el-option label="IMPORT" value="IMPORT" />
           </el-select>
         </el-form-item>
         <el-form-item label="执行目标">
-          <el-select v-model="form.targetId" placeholder="请选择目标" :disabled="!hasTargetOptions">
+          <el-select v-model="form.targetId" placeholder="请选择目标" :disabled="!canManageTasks || !hasTargetOptions">
             <el-option
               v-for="item in targetOptions"
               :key="item.value"
@@ -692,19 +731,19 @@ onBeforeUnmount(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="Cron 表达式">
-          <el-input v-model="form.cronExpr" placeholder="例如 0 */5 * * * *" />
+          <el-input v-model="form.cronExpr" placeholder="例如 0 */5 * * * *" :disabled="!canManageTasks" />
         </el-form-item>
         <el-form-item label="失败重试次数">
-          <el-input-number v-model="form.retryPolicy" :min="1" :max="5" class="full-width" />
+          <el-input-number v-model="form.retryPolicy" :min="1" :max="5" class="full-width" :disabled="!canManageTasks" />
         </el-form-item>
         <el-form-item label="初始状态">
-          <el-select v-model="form.status">
+          <el-select v-model="form.status" :disabled="!canManageTasks">
             <el-option label="ENABLED" value="ENABLED" />
             <el-option label="PAUSED" value="PAUSED" />
           </el-select>
         </el-form-item>
         <el-form-item label="任务说明">
-          <el-input v-model="form.description" type="textarea" :rows="4" />
+          <el-input v-model="form.description" type="textarea" :rows="4" :disabled="!canManageTasks" />
         </el-form-item>
       </el-form>
       <el-alert
@@ -761,9 +800,10 @@ onBeforeUnmount(() => {
         <el-table-column prop="lastRunTime" label="最近执行时间" width="180" />
         <el-table-column label="操作" width="240">
           <template #default="{ row }">
-            <el-button link type="primary" @click.stop="handleTrigger(row.taskId)">立即执行</el-button>
-            <el-button link type="warning" @click.stop="handlePause(row.taskId)">暂停</el-button>
-            <el-button link type="success" @click.stop="handleResume(row.taskId)">恢复</el-button>
+            <el-button v-if="canTriggerTasks" link type="primary" @click.stop="handleTrigger(row.taskId)">立即执行</el-button>
+            <el-button v-if="canManageTasks" link type="warning" @click.stop="handlePause(row.taskId)">暂停</el-button>
+            <el-button v-if="canManageTasks" link type="success" @click.stop="handleResume(row.taskId)">恢复</el-button>
+            <span v-if="!canManageTasks && !canTriggerTasks" class="inline-tip">仅查看</span>
           </template>
         </el-table-column>
       </el-table>

@@ -23,9 +23,22 @@ public final class RoleMenuCatalog {
         "source.manage",
         "import.database",
         "dataset.delete",
+        "governance.manage",
+        "governance.execute",
+        "task.manage",
+        "task.trigger",
+        "dataset.export",
+        "query.export",
         "user.manage",
         "role.manage",
         "log.replay"
+    );
+    private static final List<String> ADMIN_ONLY_ACTIONS = List.of(
+        "source.manage",
+        "import.database",
+        "dataset.delete",
+        "user.manage",
+        "role.manage"
     );
 
     private RoleMenuCatalog() {
@@ -56,6 +69,28 @@ public final class RoleMenuCatalog {
     public static List<String> defaultActionsForRole(String roleName) {
         if ("ADMIN".equalsIgnoreCase(roleName)) {
             return ALL_ACTIONS;
+        }
+        return List.of(
+            "governance.manage",
+            "governance.execute",
+            "task.manage",
+            "task.trigger",
+            "dataset.export",
+            "query.export",
+            "log.replay"
+        );
+    }
+
+    public static List<String> legacyDefaultActionsForRole(String roleName) {
+        if ("ADMIN".equalsIgnoreCase(roleName)) {
+            return List.of(
+                "source.manage",
+                "import.database",
+                "dataset.delete",
+                "user.manage",
+                "role.manage",
+                "log.replay"
+            );
         }
         return List.of("log.replay");
     }
@@ -114,7 +149,7 @@ public final class RoleMenuCatalog {
             if (!ALL_ACTIONS.contains(action)) {
                 throw new IllegalArgumentException("存在不支持的操作权限: " + action);
             }
-            if (!"ADMIN".equalsIgnoreCase(roleName) && List.of("source.manage", "import.database", "dataset.delete", "user.manage", "role.manage").contains(action)) {
+            if (!"ADMIN".equalsIgnoreCase(roleName) && ADMIN_ONLY_ACTIONS.contains(action)) {
                 throw new IllegalArgumentException("当前角色不能分配管理类操作权限: " + action);
             }
             normalized.add(action);

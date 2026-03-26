@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotNull;
 import java.nio.charset.StandardCharsets;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,6 +44,7 @@ public class QueryAnalysisController {
     }
 
     @PostMapping("/api/queries/filter/export")
+    @PreAuthorize("hasAuthority('ACTION_query.export')")
     public ResponseEntity<byte[]> exportFilter(
         @Valid @RequestBody FilterQueryRequest body,
         @RequestParam(defaultValue = "csv") String format
@@ -58,6 +60,7 @@ public class QueryAnalysisController {
     }
 
     @PostMapping("/api/queries/sql/export")
+    @PreAuthorize("hasAuthority('ACTION_query.export')")
     public ResponseEntity<byte[]> exportSql(
         @Valid @RequestBody SqlQueryRequest body,
         @RequestParam(defaultValue = "csv") String format

@@ -20,6 +20,19 @@ type MenuOption = {
   adminOnly?: boolean;
 };
 
+type ActionOption = {
+  key: string;
+  label: string;
+  adminOnly?: boolean;
+};
+
+type PermissionGroup = {
+  key: string;
+  label: string;
+  description: string;
+  items: string[];
+};
+
 const MENU_OPTIONS: MenuOption[] = [
   { key: 'dashboard', label: '首页' },
   { key: 'data-sources', label: '数据源管理' },
@@ -32,13 +45,61 @@ const MENU_OPTIONS: MenuOption[] = [
   { key: 'users', label: '用户与权限', adminOnly: true }
 ];
 
-const ACTION_OPTIONS = [
+const MENU_GROUPS: PermissionGroup[] = [
+  {
+    key: 'core',
+    label: '核心导航',
+    description: '控制首页、数据集、查询和日志这些高频浏览入口。',
+    items: ['dashboard', 'datasets', 'queries', 'logs']
+  },
+  {
+    key: 'pipeline',
+    label: '数据链路',
+    description: '控制数据源、数据接入、治理和任务这些生产链路入口。',
+    items: ['data-sources', 'imports', 'governance', 'tasks']
+  },
+  {
+    key: 'admin',
+    label: '系统管理',
+    description: '仅管理员可见，用于用户与权限管理。',
+    items: ['users']
+  }
+];
+
+const ACTION_OPTIONS: ActionOption[] = [
   { key: 'source.manage', label: '数据源管理操作', adminOnly: true },
   { key: 'import.database', label: '数据库表导入', adminOnly: true },
   { key: 'dataset.delete', label: '数据集删除', adminOnly: true },
+  { key: 'governance.manage', label: '治理流程保存' },
+  { key: 'governance.execute', label: '治理执行' },
+  { key: 'task.manage', label: '任务配置' },
+  { key: 'task.trigger', label: '任务触发' },
+  { key: 'dataset.export', label: '数据集导出' },
+  { key: 'query.export', label: '查询结果导出' },
   { key: 'user.manage', label: '用户管理', adminOnly: true },
   { key: 'role.manage', label: '角色配置', adminOnly: true },
   { key: 'log.replay', label: '日志回放' }
+];
+
+const ACTION_GROUPS: PermissionGroup[] = [
+  {
+    key: 'governance',
+    label: '治理与调度',
+    description: '控制治理流程保存、执行和任务配置/触发。',
+    items: ['governance.manage', 'governance.execute', 'task.manage', 'task.trigger']
+  },
+  {
+    key: 'export',
+    label: '导出与回放',
+    description: '控制数据集导出、查询导出和失败日志回放。',
+    items: ['dataset.export', 'query.export', 'log.replay']
+  },
+  {
+    key: 'admin',
+    label: '平台管理',
+    description: '控制数据源管理、数据库表导入、数据集删除和系统后台操作。',
+    items: ['source.manage', 'import.database', 'dataset.delete', 'user.manage', 'role.manage']
+  }
 ];
 
 const authStore = useAuthStore();
@@ -120,6 +181,10 @@ function menuLabel(menuKey: string) {
   return MENU_OPTIONS.find((item) => item.key === menuKey)?.label ?? menuKey;
 }
 
+function actionLabel(actionKey: string) {
+  return ACTION_OPTIONS.find((item) => item.key === actionKey)?.label ?? actionKey;
+}
+
 function normalizeMenus(menuKeys: string[], roleName?: string | null) {
   const allowedKeys = new Set(
     MENU_OPTIONS.filter((option) => roleName === 'ADMIN' || !option.adminOnly).map((option) => option.key)
@@ -132,6 +197,14 @@ function normalizeActions(actionKeys: string[], roleName?: string | null) {
     ACTION_OPTIONS.filter((option) => roleName === 'ADMIN' || !option.adminOnly).map((option) => option.key)
   );
   return ACTION_OPTIONS.map((option) => option.key).filter((key) => allowedKeys.has(key) && actionKeys.includes(key));
+}
+
+function groupedMenuOptions(group: PermissionGroup) {
+  return MENU_OPTIONS.filter((option) => group.items.includes(option.key) && (selectedRoleIsAdmin.value || !option.adminOnly));
+}
+
+function groupedActionOptions(group: PermissionGroup) {
+  return ACTION_OPTIONS.filter((option) => group.items.includes(option.key) && (selectedRoleIsAdmin.value || !option.adminOnly));
 }
 
 async function submit() {
@@ -351,7 +424,7 @@ onMounted(async () => {
             <template #default="{ row }">
               <div class="tag-cluster">
                 <el-tag v-for="actionKey in row.actionPermissions" :key="`${row.roleId}-${actionKey}`" size="small" effect="plain" type="success">
-                  {{ ACTION_OPTIONS.find((item) => item.key === actionKey)?.label || actionKey }}
+                  {{ actionLabel(actionKey) }}
                 </el-tag>
               </div>
             </template>
@@ -393,32 +466,58 @@ onMounted(async () => {
               <el-input v-model="roleForm.roleDesc" placeholder="请输入角色说明" :disabled="!canManageRoles" />
             </el-form-item>
             <el-form-item label="菜单权限">
-              <el-checkbox-group v-model="roleForm.menus" class="permission-grid">
-                <el-checkbox
-                  v-for="option in MENU_OPTIONS"
-                  :key="option.key"
-                  :label="option.key"
-                  :disabled="Boolean(!canManageRoles || (option.adminOnly && !selectedRoleIsAdmin))"
-                  class="permission-item"
+              <div class="permission-tree">
+                <section
+                  v-for="group in MENU_GROUPS"
+                  :key="group.key"
+                  v-show="groupedMenuOptions(group).length > 0"
+                  class="permission-section"
                 >
-                  {{ option.label }}
-                  <span v-if="option.adminOnly" class="permission-hint">仅管理员</span>
-                </el-checkbox>
-              </el-checkbox-group>
+                  <div class="permission-section-header">
+                    <strong>{{ group.label }}</strong>
+                    <span class="inline-tip">{{ group.description }}</span>
+                  </div>
+                  <el-checkbox-group v-model="roleForm.menus" class="permission-grid">
+                    <el-checkbox
+                      v-for="option in groupedMenuOptions(group)"
+                      :key="option.key"
+                      :label="option.key"
+                      :disabled="Boolean(!canManageRoles || (option.adminOnly && !selectedRoleIsAdmin))"
+                      class="permission-item"
+                    >
+                      {{ option.label }}
+                      <span v-if="option.adminOnly" class="permission-hint">仅管理员</span>
+                    </el-checkbox>
+                  </el-checkbox-group>
+                </section>
+              </div>
             </el-form-item>
             <el-form-item label="操作权限">
-              <el-checkbox-group v-model="roleForm.actions" class="permission-grid">
-                <el-checkbox
-                  v-for="option in ACTION_OPTIONS"
-                  :key="option.key"
-                  :label="option.key"
-                  :disabled="Boolean(!canManageRoles || (option.adminOnly && !selectedRoleIsAdmin))"
-                  class="permission-item"
+              <div class="permission-tree">
+                <section
+                  v-for="group in ACTION_GROUPS"
+                  :key="group.key"
+                  v-show="groupedActionOptions(group).length > 0"
+                  class="permission-section"
                 >
-                  {{ option.label }}
-                  <span v-if="option.adminOnly" class="permission-hint">仅管理员</span>
-                </el-checkbox>
-              </el-checkbox-group>
+                  <div class="permission-section-header">
+                    <strong>{{ group.label }}</strong>
+                    <span class="inline-tip">{{ group.description }}</span>
+                  </div>
+                  <el-checkbox-group v-model="roleForm.actions" class="permission-grid">
+                    <el-checkbox
+                      v-for="option in groupedActionOptions(group)"
+                      :key="option.key"
+                      :label="option.key"
+                      :disabled="Boolean(!canManageRoles || (option.adminOnly && !selectedRoleIsAdmin))"
+                      class="permission-item"
+                    >
+                      {{ option.label }}
+                      <span v-if="option.adminOnly" class="permission-hint">仅管理员</span>
+                    </el-checkbox>
+                  </el-checkbox-group>
+                </section>
+              </div>
             </el-form-item>
           </el-form>
           <div class="inline-tip">当前已选择 {{ roleForm.menus.length }} 个菜单：{{ selectedRoleMenuLabels.join('、') || '未选择' }}</div>

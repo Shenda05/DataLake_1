@@ -15,8 +15,10 @@ import {
   type DatasetSummary,
   type MetaField
 } from '../api/platform';
+import { useAuthStore } from '../stores/auth';
 
 const chartRef = ref<HTMLDivElement | null>(null);
+const authStore = useAuthStore();
 const datasets = ref<DatasetSummary[]>([]);
 const metadata = ref<MetaField[]>([]);
 const summary = ref({
@@ -28,6 +30,7 @@ const summary = ref({
 const tableData = ref<Record<string, unknown>[]>([]);
 const chartData = ref<{ name: string; value: number }[]>([]);
 const resultColumns = computed(() => Object.keys(tableData.value[0] || {}));
+const canExportQuery = computed(() => authStore.hasAction('query.export'));
 const lastQueryMode = ref<'FILTER' | 'SQL'>('FILTER');
 const form = reactive({
   datasetId: undefined as number | undefined,
@@ -114,6 +117,10 @@ async function runSqlQuery() {
 }
 
 async function exportRows(format: 'csv' | 'json' | 'xlsx') {
+  if (!canExportQuery.value) {
+    ElMessage.warning('当前角色没有查询结果导出权限');
+    return;
+  }
   if (!tableData.value.length) {
     ElMessage.warning('当前没有可导出的查询结果');
     return;
@@ -214,6 +221,13 @@ onBeforeUnmount(() => chart?.dispose());
       <div class="action-row">
         <el-button type="primary" plain @click="runSqlQuery">执行 SQL 查询</el-button>
       </div>
+      <el-alert
+        v-if="!canExportQuery"
+        class="notice-box"
+        title="当前角色只有查询查看权限，不能导出查询结果。"
+        type="info"
+        :closable="false"
+      />
     </el-card>
 
     <section class="stat-grid">
@@ -237,9 +251,9 @@ onBeforeUnmount(() => chart?.dispose());
           <div class="card-header">
             <span>查询结果</span>
             <div>
-              <el-button link type="primary" @click="exportRows('csv')">导出 CSV</el-button>
-              <el-button link type="primary" @click="exportRows('json')">导出 JSON</el-button>
-              <el-button link type="primary" @click="exportRows('xlsx')">导出 Excel</el-button>
+              <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('csv')">导出 CSV</el-button>
+              <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('json')">导出 JSON</el-button>
+              <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('xlsx')">导出 Excel</el-button>
             </div>
           </div>
         </template>

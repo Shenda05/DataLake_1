@@ -58,6 +58,7 @@ public class DatasetController {
     }
 
     @GetMapping("/api/datasets/{datasetId}/export")
+    @PreAuthorize("hasAuthority('ACTION_dataset.export')")
     public ResponseEntity<byte[]> export(
         @PathVariable Long datasetId,
         @RequestParam(defaultValue = "csv") String format,

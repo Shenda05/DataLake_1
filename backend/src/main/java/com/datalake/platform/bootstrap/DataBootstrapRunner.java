@@ -80,10 +80,21 @@ public class DataBootstrapRunner implements ApplicationRunner {
             return;
         }
         String normalized = RoleMenuCatalog.serializeConfiguredMenus(roleName, RoleMenuCatalog.resolveStoredMenus(roleName, role.menuPermissions()));
-        String normalizedActions = RoleMenuCatalog.serializeConfiguredActions(roleName, RoleMenuCatalog.resolveStoredActions(roleName, role.actionPermissions()));
+        String normalizedActions = normalizeRoleActions(roleName, role.actionPermissions());
         if (!normalized.equals(role.menuPermissions()) || !normalizedActions.equals(role.actionPermissions())) {
             jdbcTemplate.update("update sys_role set menu_permissions = ?, action_permissions = ? where role_name = ?", normalized, normalizedActions, roleName);
         }
+    }
+
+    private String normalizeRoleActions(String roleName, String storedActions) {
+        if (storedActions == null) {
+            return RoleMenuCatalog.serializeConfiguredActions(roleName, RoleMenuCatalog.defaultActionsForRole(roleName));
+        }
+        String legacyDefaults = RoleMenuCatalog.serializeConfiguredActions(roleName, RoleMenuCatalog.legacyDefaultActionsForRole(roleName));
+        if (legacyDefaults.equals(storedActions)) {
+            return RoleMenuCatalog.serializeConfiguredActions(roleName, RoleMenuCatalog.defaultActionsForRole(roleName));
+        }
+        return RoleMenuCatalog.serializeConfiguredActions(roleName, RoleMenuCatalog.resolveStoredActions(roleName, storedActions));
     }
 
     private void bootstrapUsers() {

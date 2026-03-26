@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -31,6 +32,7 @@ public class TaskController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('ACTION_task.manage')")
     public ApiResponse<?> create(@Valid @RequestBody SaveTaskRequest body, HttpServletRequest request) {
         return ApiResponse.success(
             taskService.create(
@@ -50,6 +52,7 @@ public class TaskController {
     }
 
     @PutMapping("/{taskId}")
+    @PreAuthorize("hasAuthority('ACTION_task.manage')")
     public ApiResponse<?> update(@PathVariable Long taskId, @Valid @RequestBody SaveTaskRequest body, HttpServletRequest request) {
         return ApiResponse.success(
             taskService.update(
@@ -69,16 +72,19 @@ public class TaskController {
     }
 
     @PostMapping("/{taskId}/trigger")
+    @PreAuthorize("hasAuthority('ACTION_task.trigger')")
     public ApiResponse<?> trigger(@PathVariable Long taskId, HttpServletRequest request) {
         return ApiResponse.success(taskService.trigger(taskId, SecurityUtils.currentUser().userId()), requestId(request));
     }
 
     @PostMapping("/{taskId}/pause")
+    @PreAuthorize("hasAuthority('ACTION_task.manage')")
     public ApiResponse<?> pause(@PathVariable Long taskId, HttpServletRequest request) {
         return ApiResponse.success(taskService.pause(taskId), requestId(request));
     }
 
     @PostMapping("/{taskId}/resume")
+    @PreAuthorize("hasAuthority('ACTION_task.manage')")
     public ApiResponse<?> resume(@PathVariable Long taskId, HttpServletRequest request) {
         return ApiResponse.success(taskService.resume(taskId), requestId(request));
     }

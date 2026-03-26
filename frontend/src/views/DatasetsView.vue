@@ -31,6 +31,7 @@ const previewFilters = reactive({
   keyword: ''
 });
 const canDeleteDataset = computed(() => authStore.hasAction('dataset.delete'));
+const canExportDataset = computed(() => authStore.hasAction('dataset.export'));
 
 async function loadDatasets() {
   datasets.value = await listDatasets();
@@ -75,6 +76,10 @@ async function handleSearch() {
 }
 
 async function handleExport(format: 'csv' | 'json' | 'xlsx') {
+  if (!canExportDataset.value) {
+    ElMessage.warning('当前角色没有数据集导出权限');
+    return;
+  }
   if (!selectedDataset.value) return;
   try {
     const result = await exportDataset(
@@ -189,15 +194,22 @@ onMounted(async () => {
           <el-button type="primary" @click="handleSearch">筛选</el-button>
         </el-form-item>
         <el-form-item>
-          <el-button @click="handleExport('csv')">导出 CSV</el-button>
+          <el-button :disabled="!canExportDataset" @click="handleExport('csv')">导出 CSV</el-button>
         </el-form-item>
         <el-form-item>
-          <el-button @click="handleExport('json')">导出 JSON</el-button>
+          <el-button :disabled="!canExportDataset" @click="handleExport('json')">导出 JSON</el-button>
         </el-form-item>
         <el-form-item>
-          <el-button @click="handleExport('xlsx')">导出 Excel</el-button>
+          <el-button :disabled="!canExportDataset" @click="handleExport('xlsx')">导出 Excel</el-button>
         </el-form-item>
       </el-form>
+      <el-alert
+        v-if="!canExportDataset"
+        class="notice-box"
+        title="当前角色只有数据集查看权限，不能导出数据集内容。"
+        type="info"
+        :closable="false"
+      />
       <el-table :data="previewPage.records" stripe>
         <el-table-column
           v-for="column in metadata"

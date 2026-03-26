@@ -12,6 +12,7 @@ import {
   type GovernanceFlow,
   type GovernanceOperator
 } from '../api/platform';
+import { useAuthStore } from '../stores/auth';
 
 type EditableStep = {
   operatorKey: string;
@@ -32,6 +33,22 @@ const form = reactive({
 const steps = ref<EditableStep[]>([
   { operatorKey: 'NULL_FILL', paramsText: '{\n  "field": "industry",\n  "fillValue": "UNKNOWN"\n}' }
 ]);
+const authStore = useAuthStore();
+const canManageGovernance = computed(() => authStore.hasAction('governance.manage'));
+const canExecuteGovernance = computed(() => authStore.hasAction('governance.execute'));
+const canEditWorkflow = computed(() => canManageGovernance.value || canExecuteGovernance.value);
+const governancePermissionHint = computed(() => {
+  if (canManageGovernance.value && canExecuteGovernance.value) {
+    return '';
+  }
+  if (canExecuteGovernance.value) {
+    return '当前角色可临时编排算子并执行治理，但不能保存治理流程。';
+  }
+  if (canManageGovernance.value) {
+    return '当前角色可保存治理流程，但不能直接执行治理。';
+  }
+  return '当前角色只有治理查看权限，不能编排、保存或执行治理流程。';
+});
 
 const selectedDatasetName = computed(() => datasets.value.find((item) => item.datasetId === form.datasetId)?.datasetName || '未选择');
 
@@ -45,6 +62,10 @@ async function loadData() {
 }
 
 function addStep() {
+  if (!canEditWorkflow.value) {
+    ElMessage.warning('当前角色没有治理操作权限');
+    return;
+  }
   steps.value.push({
     operatorKey: operators.value[0]?.operatorKey || 'NULL_FILL',
     paramsText: '{\n  "field": ""\n}'
@@ -52,6 +73,10 @@ function addStep() {
 }
 
 function removeStep(index: number) {
+  if (!canEditWorkflow.value) {
+    ElMessage.warning('当前角色没有治理操作权限');
+    return;
+  }
   if (steps.value.length === 1) {
     ElMessage.warning('至少保留一个治理步骤');
     return;
@@ -91,6 +116,10 @@ function buildOperatorChain() {
 }
 
 async function saveFlow() {
+  if (!canManageGovernance.value) {
+    ElMessage.warning('当前角色没有治理流程保存权限');
+    return;
+  }
   if (!form.datasetId || !form.flowName) {
     ElMessage.warning('请先选择输入数据集并填写流程名称');
     return;
@@ -113,6 +142,10 @@ async function saveFlow() {
 }
 
 async function executeFlow() {
+  if (!canExecuteGovernance.value) {
+    ElMessage.warning('当前角色没有治理执行权限');
+    return;
+  }
   if (!form.datasetId) {
     ElMessage.warning('请先选择输入数据集');
     return;
@@ -174,13 +207,20 @@ onMounted(async () => {
             <span>{{ editingFlowId ? '编辑治理流程' : '治理流程编排' }}</span>
             <div>
               <el-button link type="primary" @click="resetForm">重置</el-button>
-              <el-button type="primary" :loading="loading" @click="executeFlow">执行流程</el-button>
+              <el-button type="primary" :loading="loading" :disabled="!canExecuteGovernance" @click="executeFlow">执行流程</el-button>
             </div>
           </div>
         </template>
+        <el-alert
+          v-if="governancePermissionHint"
+          class="notice-box"
+          :title="governancePermissionHint"
+          type="warning"
+          :closable="false"
+        />
         <el-form label-position="top">
           <el-form-item label="输入数据集">
-            <el-select v-model="form.datasetId" placeholder="请选择数据集">
+            <el-select v-model="form.datasetId" placeholder="请选择数据集" :disabled="!canEditWorkflow">
               <el-option
                 v-for="dataset in datasets"
                 :key="dataset.datasetId"
@@ -190,10 +230,10 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
           <el-form-item label="流程名称">
-            <el-input v-model="form.flowName" placeholder="例如 企业画像清洗流程" />
+            <el-input v-model="form.flowName" placeholder="例如 企业画像清洗流程" :disabled="!canManageGovernance" />
           </el-form-item>
           <el-form-item label="执行名称">
-            <el-input v-model="form.executionName" placeholder="留空则自动生成输出数据集名称" />
+            <el-input v-model="form.executionName" placeholder="留空则自动生成输出数据集名称" :disabled="!canExecuteGovernance" />
           </el-form-item>
         </el-form>
 
@@ -207,12 +247,12 @@ onMounted(async () => {
             <template #header>
               <div class="card-header">
                 <span>步骤 {{ index + 1 }}</span>
-                <el-button link type="danger" @click="removeStep(index)">删除</el-button>
+                <el-button link type="danger" :disabled="!canEditWorkflow" @click="removeStep(index)">删除</el-button>
               </div>
             </template>
             <el-form label-position="top">
               <el-form-item label="算子">
-                <el-select v-model="step.operatorKey">
+                <el-select v-model="step.operatorKey" :disabled="!canEditWorkflow">
                   <el-option
                     v-for="operator in operators"
                     :key="operator.operatorKey"
@@ -222,15 +262,15 @@ onMounted(async () => {
                 </el-select>
               </el-form-item>
               <el-form-item label="参数 JSON">
-                <el-input v-model="step.paramsText" type="textarea" :rows="5" />
+                <el-input v-model="step.paramsText" type="textarea" :rows="5" :disabled="!canEditWorkflow" />
               </el-form-item>
             </el-form>
           </el-card>
         </div>
 
         <div class="action-row">
-          <el-button plain @click="addStep">新增步骤</el-button>
-          <el-button type="success" plain :loading="loading" @click="saveFlow">保存流程</el-button>
+          <el-button plain :disabled="!canEditWorkflow" @click="addStep">新增步骤</el-button>
+          <el-button type="success" plain :loading="loading" :disabled="!canManageGovernance" @click="saveFlow">保存流程</el-button>
         </div>
 
         <el-alert

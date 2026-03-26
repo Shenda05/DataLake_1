@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -42,6 +43,7 @@ public class GovernanceController {
     }
 
     @PostMapping("/flows")
+    @PreAuthorize("hasAuthority('ACTION_governance.manage')")
     public ApiResponse<?> createFlow(@Valid @RequestBody SaveFlowRequest body, HttpServletRequest request) {
         GovernanceService.SaveFlowResult result = governanceService.createFlow(
             body.flowName(),
@@ -53,6 +55,7 @@ public class GovernanceController {
     }
 
     @PostMapping("/execute")
+    @PreAuthorize("hasAuthority('ACTION_governance.execute')")
     public ApiResponse<?> execute(@Valid @RequestBody ExecuteFlowRequest body, HttpServletRequest request) {
         Instant start = Instant.now();
         GovernanceService.ExecutionResult result = governanceService.execute(
