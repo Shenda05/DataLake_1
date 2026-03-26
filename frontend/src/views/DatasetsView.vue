@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { computed, onMounted, reactive, ref } from 'vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { isAuthExpiredError } from '../api/client';
 import {
+  deleteDataset,
   exportDataset,
   getDatasetDetail,
   listDatasets,
@@ -13,7 +14,9 @@ import {
   type MetaField,
   type PageResponse
 } from '../api/platform';
+import { useAuthStore } from '../stores/auth';
 
+const authStore = useAuthStore();
 const datasets = ref<DatasetSummary[]>([]);
 const metadata = ref<MetaField[]>([]);
 const previewPage = ref<PageResponse<Record<string, unknown>>>({
@@ -27,6 +30,7 @@ const previewFilters = reactive({
   field: '',
   keyword: ''
 });
+const isAdmin = computed(() => authStore.profile?.role === 'ADMIN');
 
 async function loadDatasets() {
   datasets.value = await listDatasets();
@@ -70,7 +74,7 @@ async function handleSearch() {
   }
 }
 
-async function handleExport(format: 'csv' | 'json') {
+async function handleExport(format: 'csv' | 'json' | 'xlsx') {
   if (!selectedDataset.value) return;
   try {
     const result = await exportDataset(
@@ -89,6 +93,19 @@ async function handleExport(format: 'csv' | 'json') {
     window.URL.revokeObjectURL(url);
   } catch (error) {
     ElMessage.error(`导出失败: ${(error as Error).message}`);
+  }
+}
+
+async function handleDelete(dataset: DatasetSummary) {
+  try {
+    await ElMessageBox.confirm(`确定删除数据集 ${dataset.datasetName} 吗？`, '删除确认', { type: 'warning' });
+    await deleteDataset(dataset.datasetId);
+    ElMessage.success('数据集已删除');
+    await loadDatasets();
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(`删除失败: ${(error as Error).message}`);
+    }
   }
 }
 
@@ -120,6 +137,11 @@ onMounted(async () => {
         <el-table-column prop="fieldCount" label="字段数" width="120" />
         <el-table-column prop="status" label="状态" width="120" />
         <el-table-column prop="creator" label="创建人" width="120" />
+        <el-table-column v-if="isAdmin" label="操作" width="120">
+          <template #default="{ row }">
+            <el-button link type="danger" @click.stop="handleDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
 
@@ -167,6 +189,9 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item>
           <el-button @click="handleExport('json')">导出 JSON</el-button>
+        </el-form-item>
+        <el-form-item>
+          <el-button @click="handleExport('xlsx')">导出 Excel</el-button>
         </el-form-item>
       </el-form>
       <el-table :data="previewPage.records" stripe>

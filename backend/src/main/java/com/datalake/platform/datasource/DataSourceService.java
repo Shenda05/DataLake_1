@@ -1,10 +1,13 @@
 package com.datalake.platform.datasource;
 
 import com.datalake.platform.common.util.GeneratedKeyUtils;
+import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.List;
+import java.util.Locale;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -97,8 +100,61 @@ public class DataSourceService {
     }
 
     public ConnectionTestResult test(Long sourceId) {
-        DataSourceRecord record = get(sourceId);
-        return new ConnectionTestResult(record.sourceId(), true, "连接测试成功");
+        DataSourceConnectionInfo record = connectionInfo(sourceId);
+        if ("FILE".equalsIgnoreCase(record.sourceType())) {
+            return new ConnectionTestResult(record.sourceId(), true, "文件数据源无需远程连接，状态正常");
+        }
+        try (Connection connection = openConnection(record, record.dbName())) {
+            String productName = connection.getMetaData().getDatabaseProductName();
+            return new ConnectionTestResult(record.sourceId(), true, "连接测试成功，数据库类型: " + productName);
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("连接测试失败: " + exception.getMessage(), exception);
+        }
+    }
+
+    public DataSourceConnectionInfo connectionInfo(Long sourceId) {
+        DataSourceConnectionInfo record = jdbcTemplate.query(
+            """
+                select source_id,source_name,source_type,host,port,db_name,username,password,status,description
+                from data_source
+                where source_id = ?
+            """,
+            rs -> rs.next()
+                ? new DataSourceConnectionInfo(
+                    rs.getLong("source_id"),
+                    rs.getString("source_name"),
+                    rs.getString("source_type"),
+                    rs.getString("host"),
+                    (Integer) rs.getObject("port"),
+                    rs.getString("db_name"),
+                    rs.getString("username"),
+                    rs.getString("password"),
+                    rs.getString("status"),
+                    rs.getString("description")
+                )
+                : null,
+            sourceId
+        );
+        if (record == null) {
+            throw new IllegalArgumentException("数据源不存在: " + sourceId);
+        }
+        return record;
+    }
+
+    public Connection openConnection(DataSourceConnectionInfo profile, String databaseName) throws Exception {
+        String sourceType = profile.sourceType() == null ? "" : profile.sourceType().toUpperCase(Locale.ROOT);
+        if (!"MYSQL".equals(sourceType)) {
+            throw new IllegalArgumentException("当前仅支持 MYSQL 数据库表导入");
+        }
+        String host = profile.host() == null || profile.host().isBlank() ? "127.0.0.1" : profile.host().trim();
+        int port = profile.port() == null ? 3306 : profile.port();
+        String catalog = databaseName == null || databaseName.isBlank() ? profile.dbName() : databaseName;
+        String url = "jdbc:mysql://" + host + ":" + port;
+        if (catalog != null && !catalog.isBlank()) {
+            url += "/" + catalog.trim();
+        }
+        url += "?useUnicode=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true";
+        return DriverManager.getConnection(url, profile.username(), profile.password());
     }
 
     private DataSourceRecord get(Long sourceId) {
@@ -147,5 +203,19 @@ public class DataSourceService {
     }
 
     public record ConnectionTestResult(Long sourceId, boolean connected, String message) {
+    }
+
+    public record DataSourceConnectionInfo(
+        Long sourceId,
+        String sourceName,
+        String sourceType,
+        String host,
+        Integer port,
+        String dbName,
+        String username,
+        String password,
+        String status,
+        String description
+    ) {
     }
 }

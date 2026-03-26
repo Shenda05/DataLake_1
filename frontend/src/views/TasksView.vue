@@ -20,6 +20,20 @@ import {
 } from '../api/platform';
 
 const TASK_FILTERS_KEY = 'data-lake-task-filters';
+const TASK_FILTER_VIEWS_KEY = 'data-lake-task-filter-views';
+type TaskFilterSnapshot = {
+  keyword: string;
+  status: string;
+  taskType: string;
+  targetId: string;
+  timeRange: string[];
+  failedOnly: boolean;
+};
+type SavedTaskFilterView = {
+  id: string;
+  name: string;
+  filters: TaskFilterSnapshot;
+};
 const route = useRoute();
 const router = useRouter();
 const tasks = ref<TaskSummary[]>([]);
@@ -32,6 +46,9 @@ const autoRefreshEnabled = ref(true);
 const refreshSeconds = ref(15);
 const lastSyncedAt = ref('');
 const recentAction = ref<{ type: 'success' | 'info' | 'warning'; message: string } | null>(null);
+const savedViewName = ref('');
+const selectedViewId = ref('');
+const savedViews = ref<SavedTaskFilterView[]>([]);
 let refreshTimer: ReturnType<typeof window.setInterval> | null = null;
 const filters = reactive({
   keyword: '',
@@ -59,10 +76,14 @@ const targetOptions = computed(() => {
     }));
   }
   return flows.value.map((item) => ({
-    value: item.flowId,
-    label: `${item.flowName} / ${item.inputDatasetName}`
+      value: item.flowId,
+      label: `${item.flowName} / ${item.inputDatasetName}`
   }));
 });
+const hasTargetOptions = computed(() => targetOptions.value.length > 0);
+const targetEmptyTip = computed(() =>
+  form.taskType === 'IMPORT' ? '当前还没有可用的导入历史，请先到“数据接入”完成一次导入。' : '当前还没有可用的治理流程，请先到“数据治理”保存一个流程。'
+);
 
 const taskTargetOptions = computed(() => {
   const map = new Map<string, { value: string; label: string }>();
@@ -114,6 +135,7 @@ const latestLogByTask = computed(() => {
 });
 
 restoreFilters();
+loadSavedViews();
 
 async function loadData(showMessage = false) {
   const [taskItems, flowItems, importItems, logItems] = await Promise.all([
@@ -134,7 +156,7 @@ async function loadData(showMessage = false) {
     }
   }
   if (!form.targetId || !targetOptions.value.some((item) => item.value === form.targetId)) {
-    form.targetId = targetOptions.value[0].value;
+    form.targetId = targetOptions.value[0]?.value;
   }
   lastSyncedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false });
   if (showMessage) {
@@ -168,6 +190,10 @@ function loadTask(task: TaskSummary, syncRoute = true) {
 }
 
 async function submit() {
+  if (!hasTargetOptions.value) {
+    ElMessage.warning(targetEmptyTip.value);
+    return;
+  }
   if (!form.taskName || !form.targetId || !form.cronExpr) {
     ElMessage.warning('请填写任务名称、目标和 Cron 表达式');
     return;
@@ -287,6 +313,17 @@ function isRecentFailed(log?: TaskLogSummary | null) {
   return timestamp !== null && Date.now() - timestamp <= 7 * 24 * 60 * 60 * 1000;
 }
 
+function snapshotFilters(): TaskFilterSnapshot {
+  return {
+    keyword: filters.keyword,
+    status: filters.status,
+    taskType: filters.taskType,
+    targetId: filters.targetId,
+    timeRange: [...filters.timeRange],
+    failedOnly: filters.failedOnly
+  };
+}
+
 function restoreFilters() {
   const queryKeyword = getQueryValue('keyword');
   const queryStatus = getQueryValue('status');
@@ -320,15 +357,80 @@ function restoreFilters() {
 function persistFilters() {
   localStorage.setItem(
     TASK_FILTERS_KEY,
-    JSON.stringify({
-      keyword: filters.keyword,
-      status: filters.status,
-      taskType: filters.taskType,
-      targetId: filters.targetId,
-      timeRange: filters.timeRange,
-      failedOnly: filters.failedOnly
-    })
+    JSON.stringify(snapshotFilters())
   );
+}
+
+function loadSavedViews() {
+  const stored = localStorage.getItem(TASK_FILTER_VIEWS_KEY);
+  if (!stored) {
+    savedViews.value = [];
+    return;
+  }
+  try {
+    const parsed = JSON.parse(stored) as SavedTaskFilterView[];
+    savedViews.value = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    localStorage.removeItem(TASK_FILTER_VIEWS_KEY);
+    savedViews.value = [];
+  }
+}
+
+function persistSavedViews() {
+  localStorage.setItem(TASK_FILTER_VIEWS_KEY, JSON.stringify(savedViews.value));
+}
+
+function applyFilterSnapshot(snapshot: TaskFilterSnapshot) {
+  filters.keyword = snapshot.keyword || '';
+  filters.status = snapshot.status || '';
+  filters.taskType = snapshot.taskType || '';
+  filters.targetId = snapshot.targetId || '';
+  filters.timeRange = Array.isArray(snapshot.timeRange) ? snapshot.timeRange : [];
+  filters.failedOnly = Boolean(snapshot.failedOnly);
+}
+
+function saveCurrentView() {
+  if (!savedViewName.value.trim()) {
+    ElMessage.warning('请先输入视图名称');
+    return;
+  }
+  const existingIndex = savedViews.value.findIndex((item) => item.name === savedViewName.value.trim());
+  const nextView: SavedTaskFilterView = {
+    id: existingIndex >= 0 ? savedViews.value[existingIndex].id : `task-view-${Date.now()}`,
+    name: savedViewName.value.trim(),
+    filters: snapshotFilters()
+  };
+  if (existingIndex >= 0) {
+    savedViews.value.splice(existingIndex, 1, nextView);
+  } else {
+    savedViews.value.unshift(nextView);
+  }
+  selectedViewId.value = nextView.id;
+  persistSavedViews();
+  ElMessage.success('已保存当前筛选视图');
+}
+
+function applySelectedView() {
+  if (!selectedViewId.value) {
+    return;
+  }
+  const matched = savedViews.value.find((item) => item.id === selectedViewId.value);
+  if (!matched) {
+    return;
+  }
+  savedViewName.value = matched.name;
+  applyFilterSnapshot(matched.filters);
+}
+
+function deleteSelectedView() {
+  if (!selectedViewId.value) {
+    ElMessage.warning('请先选择要删除的视图');
+    return;
+  }
+  savedViews.value = savedViews.value.filter((item) => item.id !== selectedViewId.value);
+  selectedViewId.value = '';
+  persistSavedViews();
+  ElMessage.success('筛选视图已删除');
 }
 
 function syncRouteState(patch: Record<string, string>) {
@@ -373,6 +475,13 @@ function stopAutoRefresh() {
 watch([autoRefreshEnabled, refreshSeconds], () => {
   startAutoRefresh();
 });
+
+watch(
+  () => form.taskType,
+  () => {
+    form.targetId = targetOptions.value[0]?.value;
+  }
+);
 
 watch(
   () => [filters.keyword, filters.status, filters.taskType, filters.targetId, filters.timeRange[0], filters.timeRange[1], String(filters.failedOnly)],
@@ -485,6 +594,20 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
+      <div class="saved-view-toolbar">
+        <el-input v-model="savedViewName" class="saved-view-name" placeholder="保存为常用视图，例如：近 7 天失败任务" />
+        <el-select v-model="selectedViewId" class="saved-view-select" clearable placeholder="选择已保存视图">
+          <el-option
+            v-for="item in savedViews"
+            :key="item.id"
+            :label="item.name"
+            :value="item.id"
+          />
+        </el-select>
+        <el-button @click="applySelectedView">应用视图</el-button>
+        <el-button @click="saveCurrentView">保存当前视图</el-button>
+        <el-button link type="danger" @click="deleteSelectedView">删除视图</el-button>
+      </div>
       <el-form inline>
         <el-form-item label="关键字">
           <el-input v-model="filters.keyword" placeholder="任务名 / 目标 / 说明" />
@@ -559,7 +682,7 @@ onBeforeUnmount(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="执行目标">
-          <el-select v-model="form.targetId" placeholder="请选择目标">
+          <el-select v-model="form.targetId" placeholder="请选择目标" :disabled="!hasTargetOptions">
             <el-option
               v-for="item in targetOptions"
               :key="item.value"
@@ -588,6 +711,13 @@ onBeforeUnmount(() => {
         class="notice-box"
         title="当前版本支持 IMPORT 和 GOVERNANCE 两类真实任务，调度器会按 nextRunTime 轮询执行"
         type="info"
+        :closable="false"
+      />
+      <el-alert
+        v-if="!hasTargetOptions"
+        class="notice-box"
+        :title="targetEmptyTip"
+        type="warning"
         :closable="false"
       />
       </el-card>

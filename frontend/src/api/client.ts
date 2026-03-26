@@ -104,6 +104,18 @@ export async function apiDownload(url: string, params?: Record<string, unknown>)
     params,
     responseType: 'blob'
   });
+  return resolveDownload(response);
+}
+
+export async function apiDownloadPost(url: string, data?: unknown, params?: Record<string, unknown>) {
+  const response = await client.post(url, data, {
+    params,
+    responseType: 'blob'
+  });
+  return resolveDownload(response);
+}
+
+function resolveDownload(response: { data: Blob; headers: Record<string, unknown> }) {
   const disposition = response.headers['content-disposition'] as string | undefined;
   const filename = disposition?.match(/filename\*=UTF-8''([^;]+)/)?.[1];
   return {

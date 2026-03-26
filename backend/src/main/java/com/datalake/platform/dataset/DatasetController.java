@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,6 +34,7 @@ public class DatasetController {
     }
 
     @DeleteMapping("/api/datasets/{datasetId}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<Void> delete(@PathVariable Long datasetId, HttpServletRequest request) {
         datasetService.delete(datasetId);
         return ApiResponse.success(requestId(request));
@@ -62,7 +64,7 @@ public class DatasetController {
         @RequestParam(required = false) String field,
         @RequestParam(required = false) String keyword
     ) {
-        DatasetService.DatasetExport export = datasetService.export(datasetId, format, field, keyword);
+        TabularExportService.ExportedFile export = datasetService.export(datasetId, format, field, keyword);
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_TYPE, export.contentType())
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + java.net.URLEncoder.encode(export.fileName(), StandardCharsets.UTF_8))

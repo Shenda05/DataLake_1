@@ -6,10 +6,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.nio.charset.StandardCharsets;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -36,6 +40,33 @@ public class QueryAnalysisController {
     @PostMapping("/api/queries/sql")
     public ApiResponse<?> sql(@Valid @RequestBody SqlQueryRequest body, HttpServletRequest request) {
         return ApiResponse.success(queryAnalysisService.sql(new QueryAnalysisService.SqlQueryRequest(body.datasetId(), body.sql())), requestId(request));
+    }
+
+    @PostMapping("/api/queries/filter/export")
+    public ResponseEntity<byte[]> exportFilter(
+        @Valid @RequestBody FilterQueryRequest body,
+        @RequestParam(defaultValue = "csv") String format
+    ) {
+        TabularExportService.ExportedFile export = queryAnalysisService.exportFilter(
+            new QueryAnalysisService.FilterQueryRequest(body.datasetId(), body.field(), body.operator(), body.value(), body.pageNum(), body.pageSize()),
+            format
+        );
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_TYPE, export.contentType())
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + java.net.URLEncoder.encode(export.fileName(), StandardCharsets.UTF_8))
+            .body(export.content());
+    }
+
+    @PostMapping("/api/queries/sql/export")
+    public ResponseEntity<byte[]> exportSql(
+        @Valid @RequestBody SqlQueryRequest body,
+        @RequestParam(defaultValue = "csv") String format
+    ) {
+        TabularExportService.ExportedFile export = queryAnalysisService.exportSql(new QueryAnalysisService.SqlQueryRequest(body.datasetId(), body.sql()), format);
+        return ResponseEntity.ok()
+            .header(HttpHeaders.CONTENT_TYPE, export.contentType())
+            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + java.net.URLEncoder.encode(export.fileName(), StandardCharsets.UTF_8))
+            .body(export.content());
     }
 
     @GetMapping("/api/analysis/{datasetId}/summary")

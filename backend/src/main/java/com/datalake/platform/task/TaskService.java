@@ -144,6 +144,15 @@ public class TaskService {
     }
 
     @Transactional
+    public TaskActionResponse replayFromLog(Long logId, Long userId) {
+        TaskLogService.TaskLogDetail log = taskLogService.detail(logId);
+        if (log.taskId() == null) {
+            throw new IllegalArgumentException("该日志不是调度任务生成的记录，暂不支持一键回放");
+        }
+        return executeTask(log.taskId(), userId, true);
+    }
+
+    @Transactional
     public void executeDueTasks() {
         List<Long> dueTaskIds = jdbcTemplate.query(
             "select task_id from task_def where status = 'ENABLED' and next_run_time is not null and next_run_time <= ? order by next_run_time asc",

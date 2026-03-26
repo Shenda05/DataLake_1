@@ -4,8 +4,6 @@ import com.datalake.platform.common.util.GeneratedKeyUtils;
 import com.datalake.platform.common.util.SqlNameUtils;
 import com.datalake.platform.common.web.PageResponse;
 import com.datalake.platform.datasource.FileParserService;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.nio.charset.StandardCharsets;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -22,12 +20,12 @@ public class DatasetService {
 
     private final JdbcTemplate jdbcTemplate;
     private final DatasetTableService datasetTableService;
-    private final ObjectMapper objectMapper;
+    private final TabularExportService tabularExportService;
 
-    public DatasetService(JdbcTemplate jdbcTemplate, DatasetTableService datasetTableService, ObjectMapper objectMapper) {
+    public DatasetService(JdbcTemplate jdbcTemplate, DatasetTableService datasetTableService, TabularExportService tabularExportService) {
         this.jdbcTemplate = jdbcTemplate;
         this.datasetTableService = datasetTableService;
-        this.objectMapper = objectMapper;
+        this.tabularExportService = tabularExportService;
     }
 
     public CreatedDataset createImportedDataset(
@@ -177,23 +175,56 @@ public class DatasetService {
         return datasetTableService.preview(detail.physicalTableName(), metadata(datasetId), pageNum, pageSize, field, keyword);
     }
 
-    public DatasetExport export(Long datasetId, String format, String field, String keyword) {
+    public TabularExportService.ExportedFile export(Long datasetId, String format, String field, String keyword) {
         DatasetDetail detail = detail(datasetId);
         List<MetaFieldRecord> columns = metadata(datasetId);
         List<Map<String, Object>> rows = datasetTableService.fetchAll(detail.physicalTableName(), columns, field, keyword);
-        String normalizedFormat = format == null ? "csv" : format.toLowerCase();
-        return switch (normalizedFormat) {
-            case "json" -> exportJson(detail.datasetName(), rows);
-            case "csv" -> exportCsv(detail.datasetName(), columns, rows);
-            default -> throw new IllegalArgumentException("仅支持导出 csv 或 json");
-        };
+        List<String> headers = columns.stream().map(MetaFieldRecord::fieldName).toList();
+        return tabularExportService.export(detail.datasetName(), headers, rows, format);
     }
 
     public void delete(Long datasetId) {
         DatasetDetail detail = detail(datasetId);
+        validateDelete(detail);
         datasetTableService.dropTable(detail.physicalTableName());
         jdbcTemplate.update("delete from meta_field where dataset_id = ?", datasetId);
         jdbcTemplate.update("delete from data_set where dataset_id = ?", datasetId);
+    }
+
+    private void validateDelete(DatasetDetail detail) {
+        Long datasetId = detail.datasetId();
+        Integer inputFlowRefs = jdbcTemplate.queryForObject(
+            "select count(*) from governance_flow where input_dataset_id = ?",
+            Integer.class,
+            datasetId
+        );
+        if (inputFlowRefs != null && inputFlowRefs > 0) {
+            throw new IllegalArgumentException("该数据集已被治理流程作为输入引用，不能删除");
+        }
+        Integer outputFlowRefs = jdbcTemplate.queryForObject(
+            "select count(*) from governance_flow where output_dataset_id = ?",
+            Integer.class,
+            datasetId
+        );
+        if (outputFlowRefs != null && outputFlowRefs > 0) {
+            throw new IllegalArgumentException("该数据集已被治理流程作为输出引用，不能删除");
+        }
+        Integer governanceLogRefs = jdbcTemplate.queryForObject(
+            "select count(*) from task_log where task_type = 'GOVERNANCE' and target_id = ?",
+            Integer.class,
+            datasetId
+        );
+        if (governanceLogRefs != null && governanceLogRefs > 0) {
+            throw new IllegalArgumentException("该数据集已有治理执行日志，不能删除");
+        }
+        Integer importRecordRefs = jdbcTemplate.queryForObject(
+            "select count(*) from import_record where dataset_name = ?",
+            Integer.class,
+            detail.datasetName()
+        );
+        if (importRecordRefs != null && importRecordRefs > 0) {
+            throw new IllegalArgumentException("该数据集已有导入记录关联，不能删除");
+        }
     }
 
     private List<MetaFieldRecord> insertMetaFields(Long datasetId, List<MetaFieldRecord> columns) {
@@ -234,36 +265,6 @@ public class DatasetService {
 
     private Timestamp now() {
         return Timestamp.from(java.time.Instant.now());
-    }
-
-    private DatasetExport exportCsv(String datasetName, List<MetaFieldRecord> columns, List<Map<String, Object>> rows) {
-        StringBuilder builder = new StringBuilder();
-        builder.append(columns.stream().map(MetaFieldRecord::fieldName).reduce((left, right) -> left + "," + right).orElse("")).append('\n');
-        for (Map<String, Object> row : rows) {
-            List<String> values = new ArrayList<>();
-            for (MetaFieldRecord column : columns) {
-                Object value = row.get(column.fieldName());
-                values.add(csvEscape(value == null ? "" : String.valueOf(value)));
-            }
-            builder.append(String.join(",", values)).append('\n');
-        }
-        return new DatasetExport(datasetName + ".csv", "text/csv;charset=UTF-8", builder.toString().getBytes(StandardCharsets.UTF_8));
-    }
-
-    private DatasetExport exportJson(String datasetName, List<Map<String, Object>> rows) {
-        try {
-            return new DatasetExport(datasetName + ".json", "application/json", objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(rows));
-        } catch (Exception exception) {
-            throw new IllegalArgumentException("JSON 导出失败: " + exception.getMessage(), exception);
-        }
-    }
-
-    private String csvEscape(String value) {
-        String escaped = value.replace("\"", "\"\"");
-        if (escaped.contains(",") || escaped.contains("\"") || escaped.contains("\n")) {
-            return "\"" + escaped + "\"";
-        }
-        return escaped;
     }
 
     public record CreatedDataset(Long datasetId, String datasetName, String physicalTableName, int recordCount, int fieldCount) {
@@ -309,8 +310,5 @@ public class DatasetService {
         String sampleValue,
         int fieldOrder
     ) {
-    }
-
-    public record DatasetExport(String fileName, String contentType, byte[] content) {
     }
 }

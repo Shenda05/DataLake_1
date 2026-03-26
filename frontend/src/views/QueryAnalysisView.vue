@@ -4,6 +4,8 @@ import { ElMessage } from 'element-plus';
 import * as echarts from 'echarts';
 import { isAuthExpiredError } from '../api/client';
 import {
+  exportFilterQuery,
+  exportSqlQuery,
   filterQuery,
   getAnalysisCharts,
   getAnalysisSummary,
@@ -26,6 +28,7 @@ const summary = ref({
 const tableData = ref<Record<string, unknown>[]>([]);
 const chartData = ref<{ name: string; value: number }[]>([]);
 const resultColumns = computed(() => Object.keys(tableData.value[0] || {}));
+const lastQueryMode = ref<'FILTER' | 'SQL'>('FILTER');
 const form = reactive({
   datasetId: undefined as number | undefined,
   field: '',
@@ -86,6 +89,7 @@ async function runFilterQuery() {
       pageNum: 1,
       pageSize: 20
     });
+    lastQueryMode.value = 'FILTER';
     tableData.value = result.records;
     await loadDatasetAnalysis();
   } catch (error) {
@@ -99,6 +103,7 @@ async function runSqlQuery() {
     return;
   }
   try {
+    lastQueryMode.value = 'SQL';
     tableData.value = await sqlQuery({
       datasetId: form.datasetId,
       sql: form.sql
@@ -108,36 +113,37 @@ async function runSqlQuery() {
   }
 }
 
-function exportRows(format: 'csv' | 'json') {
+async function exportRows(format: 'csv' | 'json' | 'xlsx') {
   if (!tableData.value.length) {
     ElMessage.warning('当前没有可导出的查询结果');
     return;
   }
-  const filename = `query-result.${format}`;
-  let blob: Blob;
-  if (format === 'json') {
-    blob = new Blob([JSON.stringify(tableData.value, null, 2)], { type: 'application/json' });
-  } else {
-    const headers = Object.keys(tableData.value[0]);
-    const rows = tableData.value.map((row) =>
-      headers
-        .map((header) => {
-          const value = row[header] == null ? '' : String(row[header]);
-          const escaped = value.replace(/"/g, '""');
-          return escaped.includes(',') || escaped.includes('"') || escaped.includes('\n') ? `"${escaped}"` : escaped;
-        })
-        .join(',')
-    );
-    blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8' });
+  try {
+    const result =
+      lastQueryMode.value === 'SQL'
+        ? await exportSqlQuery({ datasetId: form.datasetId!, sql: form.sql }, format)
+        : await exportFilterQuery(
+            {
+              datasetId: form.datasetId!,
+              field: form.field,
+              operator: form.operator,
+              value: form.value,
+              pageNum: 1,
+              pageSize: 20
+            },
+            format
+          );
+    const url = window.URL.createObjectURL(result.blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = result.filename || `query-result.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (error) {
+    ElMessage.error(`导出失败: ${(error as Error).message}`);
   }
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.URL.revokeObjectURL(url);
 }
 
 onMounted(async () => {
@@ -233,6 +239,7 @@ onBeforeUnmount(() => chart?.dispose());
             <div>
               <el-button link type="primary" @click="exportRows('csv')">导出 CSV</el-button>
               <el-button link type="primary" @click="exportRows('json')">导出 JSON</el-button>
+              <el-button link type="primary" @click="exportRows('xlsx')">导出 Excel</el-button>
             </div>
           </div>
         </template>

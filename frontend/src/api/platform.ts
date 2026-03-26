@@ -1,4 +1,4 @@
-import { apiDelete, apiDownload, apiGet, apiPost, apiPut, apiUpload } from './client';
+import { apiDelete, apiDownload, apiDownloadPost, apiGet, apiPost, apiPut, apiUpload } from './client';
 
 export type LoginResult = {
   token: string;
@@ -29,6 +29,26 @@ export type ImportHistory = {
   recordCount: number;
   errorMessage?: string | null;
   createTime: string;
+};
+
+export type DatabaseTableOption = {
+  schemaName: string;
+  tableName: string;
+  displayName: string;
+};
+
+export type DatabasePreviewColumn = {
+  fieldName: string;
+  fieldType: string;
+  nullable: boolean;
+  sampleValue?: string | null;
+};
+
+export type DatabasePreview = {
+  schemaName: string;
+  tableName: string;
+  columns: DatabasePreviewColumn[];
+  records: Record<string, unknown>[];
 };
 
 export type DatasetSummary = {
@@ -147,6 +167,23 @@ export type TaskLogDetail = TaskLogSummary & {
   createTime?: string | null;
 };
 
+export type RoleSummary = {
+  roleId: number;
+  roleName: string;
+  roleDesc?: string | null;
+};
+
+export type UserSummary = {
+  userId: number;
+  username: string;
+  roleId: number;
+  role: string;
+  roleDesc?: string | null;
+  status: string;
+  createTime?: string | null;
+  updateTime?: string | null;
+};
+
 export function login(payload: { username: string; password: string }) {
   return apiPost<LoginResult>('/auth/login', payload);
 }
@@ -203,6 +240,32 @@ export function importFile(formData: FormData) {
   }>('/imports/file', formData);
 }
 
+export function importDatabase(payload: {
+  sourceId: number;
+  schemaName?: string;
+  tableName: string;
+  datasetName: string;
+  description?: string;
+}) {
+  return apiPost<{
+    importId: number;
+    datasetId: number;
+    datasetName: string;
+    formatType: string;
+    recordCount: number;
+    status: string;
+    errorMessage: string;
+  }>('/imports/database', payload);
+}
+
+export function listDatabaseTables(sourceId: number, schemaName?: string) {
+  return apiGet<DatabaseTableOption[]>('/imports/database/tables', { sourceId, schemaName });
+}
+
+export function previewDatabaseTable(sourceId: number, tableName: string, schemaName?: string, limit = 10) {
+  return apiGet<DatabasePreview>('/imports/database/preview', { sourceId, schemaName, tableName, limit });
+}
+
 export function listImportHistory() {
   return apiGet<ImportHistory[]>('/imports/history');
 }
@@ -227,8 +290,12 @@ export function previewDatasetWithFilter(datasetId: number, pageNum = 1, pageSiz
   return apiGet<PageResponse<Record<string, unknown>>>(`/preview/${datasetId}`, { pageNum, pageSize, field, keyword });
 }
 
-export function exportDataset(datasetId: number, format: 'csv' | 'json', field?: string, keyword?: string) {
+export function exportDataset(datasetId: number, format: 'csv' | 'json' | 'xlsx', field?: string, keyword?: string) {
   return apiDownload(`/datasets/${datasetId}/export`, { format, field, keyword });
+}
+
+export function deleteDataset(datasetId: number) {
+  return apiDelete<void>(`/datasets/${datasetId}`);
 }
 
 export function filterQuery(payload: {
@@ -244,6 +311,24 @@ export function filterQuery(payload: {
 
 export function sqlQuery(payload: { datasetId: number; sql: string }) {
   return apiPost<Record<string, unknown>[]>('/queries/sql', payload);
+}
+
+export function exportFilterQuery(
+  payload: {
+    datasetId: number;
+    field: string;
+    operator: string;
+    value: string;
+    pageNum?: number;
+    pageSize?: number;
+  },
+  format: 'csv' | 'json' | 'xlsx'
+) {
+  return apiDownloadPost('/queries/filter/export', payload, { format });
+}
+
+export function exportSqlQuery(payload: { datasetId: number; sql: string }, format: 'csv' | 'json' | 'xlsx') {
+  return apiDownloadPost('/queries/sql/export', payload, { format });
 }
 
 export function getAnalysisSummary(datasetId: number) {
@@ -332,4 +417,28 @@ export function listTaskLogs() {
 
 export function getTaskLogDetail(logId: number) {
   return apiGet<TaskLogDetail>(`/task-logs/${logId}`);
+}
+
+export function replayTaskLog(logId: number) {
+  return apiPost<TaskActionResponse>(`/task-logs/${logId}/replay`);
+}
+
+export function listRoles() {
+  return apiGet<RoleSummary[]>('/roles');
+}
+
+export function listUsers() {
+  return apiGet<UserSummary[]>('/users');
+}
+
+export function createUser(payload: { username: string; password: string; roleId: number; status?: string }) {
+  return apiPost<UserSummary>('/users', payload);
+}
+
+export function updateUser(userId: number, payload: { username: string; password?: string; roleId: number; status?: string }) {
+  return apiPut<UserSummary>(`/users/${userId}`, payload);
+}
+
+export function deleteUser(userId: number) {
+  return apiDelete<void>(`/users/${userId}`);
 }

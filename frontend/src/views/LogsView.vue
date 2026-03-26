@@ -3,14 +3,31 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { isAuthExpiredError } from '../api/client';
-import { getTaskLogDetail, listTaskLogs, type TaskLogDetail, type TaskLogSummary } from '../api/platform';
+import { getTaskLogDetail, listTaskLogs, replayTaskLog, type TaskLogDetail, type TaskLogSummary } from '../api/platform';
 
 const LOG_FILTERS_KEY = 'data-lake-log-filters';
+const LOG_FILTER_VIEWS_KEY = 'data-lake-log-filter-views';
+type LogFilterSnapshot = {
+  keyword: string;
+  status: string;
+  taskType: string;
+  targetId: string;
+  timeRange: string[];
+  failedOnly: boolean;
+};
+type SavedLogFilterView = {
+  id: string;
+  name: string;
+  filters: LogFilterSnapshot;
+};
 const route = useRoute();
 const router = useRouter();
 const logs = ref<TaskLogSummary[]>([]);
 const selectedLog = ref<TaskLogDetail | null>(null);
 const lastSyncedAt = ref('');
+const savedViewName = ref('');
+const selectedViewId = ref('');
+const savedViews = ref<SavedLogFilterView[]>([]);
 const filters = reactive({
   keyword: '',
   status: '',
@@ -65,6 +82,7 @@ const avgDuration = computed(() => {
 const recentFailedCount = computed(() => logs.value.filter((item) => isRecentFailed(item)).length);
 
 restoreFilters();
+loadSavedViews();
 
 async function loadData() {
   logs.value = await listTaskLogs();
@@ -85,6 +103,20 @@ async function selectLog(logId: number, syncRoute = true) {
   selectedLog.value = await getTaskLogDetail(logId);
   if (syncRoute) {
     syncRouteState({ logId: String(logId) });
+  }
+}
+
+async function handleReplay(log?: TaskLogSummary | TaskLogDetail | null) {
+  if (!log?.taskId) {
+    ElMessage.warning('当前日志不是调度任务生成，暂不支持回放');
+    return;
+  }
+  try {
+    const result = await replayTaskLog(log.logId);
+    ElMessage.success(result.message);
+    await loadData();
+  } catch (error) {
+    ElMessage.error(`回放失败: ${(error as Error).message}`);
   }
 }
 
@@ -175,6 +207,17 @@ function isRecentFailed(log?: TaskLogSummary | null) {
   return timestamp !== null && Date.now() - timestamp <= 7 * 24 * 60 * 60 * 1000;
 }
 
+function snapshotFilters(): LogFilterSnapshot {
+  return {
+    keyword: filters.keyword,
+    status: filters.status,
+    taskType: filters.taskType,
+    targetId: filters.targetId,
+    timeRange: [...filters.timeRange],
+    failedOnly: filters.failedOnly
+  };
+}
+
 function restoreFilters() {
   const queryKeyword = getQueryValue('keyword');
   const queryStatus = getQueryValue('status');
@@ -208,15 +251,90 @@ function restoreFilters() {
 function persistFilters() {
   localStorage.setItem(
     LOG_FILTERS_KEY,
-    JSON.stringify({
-      keyword: filters.keyword,
-      status: filters.status,
-      taskType: filters.taskType,
-      targetId: filters.targetId,
-      timeRange: filters.timeRange,
-      failedOnly: filters.failedOnly
-    })
+    JSON.stringify(snapshotFilters())
   );
+}
+
+function loadSavedViews() {
+  const stored = localStorage.getItem(LOG_FILTER_VIEWS_KEY);
+  if (!stored) {
+    savedViews.value = [];
+    return;
+  }
+  try {
+    const parsed = JSON.parse(stored) as SavedLogFilterView[];
+    savedViews.value = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    localStorage.removeItem(LOG_FILTER_VIEWS_KEY);
+    savedViews.value = [];
+  }
+}
+
+function persistSavedViews() {
+  localStorage.setItem(LOG_FILTER_VIEWS_KEY, JSON.stringify(savedViews.value));
+}
+
+function applyFilterSnapshot(snapshot: LogFilterSnapshot) {
+  filters.keyword = snapshot.keyword || '';
+  filters.status = snapshot.status || '';
+  filters.taskType = snapshot.taskType || '';
+  filters.targetId = snapshot.targetId || '';
+  filters.timeRange = Array.isArray(snapshot.timeRange) ? snapshot.timeRange : [];
+  filters.failedOnly = Boolean(snapshot.failedOnly);
+}
+
+function saveCurrentView() {
+  if (!savedViewName.value.trim()) {
+    ElMessage.warning('请先输入视图名称');
+    return;
+  }
+  const existingIndex = savedViews.value.findIndex((item) => item.name === savedViewName.value.trim());
+  const nextView: SavedLogFilterView = {
+    id: existingIndex >= 0 ? savedViews.value[existingIndex].id : `log-view-${Date.now()}`,
+    name: savedViewName.value.trim(),
+    filters: snapshotFilters()
+  };
+  if (existingIndex >= 0) {
+    savedViews.value.splice(existingIndex, 1, nextView);
+  } else {
+    savedViews.value.unshift(nextView);
+  }
+  selectedViewId.value = nextView.id;
+  persistSavedViews();
+  ElMessage.success('已保存当前日志筛选视图');
+}
+
+function applySelectedView() {
+  if (!selectedViewId.value) {
+    return;
+  }
+  const matched = savedViews.value.find((item) => item.id === selectedViewId.value);
+  if (!matched) {
+    return;
+  }
+  savedViewName.value = matched.name;
+  applyFilterSnapshot(matched.filters);
+}
+
+function deleteSelectedView() {
+  if (!selectedViewId.value) {
+    ElMessage.warning('请先选择要删除的视图');
+    return;
+  }
+  savedViews.value = savedViews.value.filter((item) => item.id !== selectedViewId.value);
+  selectedViewId.value = '';
+  persistSavedViews();
+  ElMessage.success('日志筛选视图已删除');
+}
+
+function focusLatestFailed() {
+  const latestFailed = logs.value.find((item) => item.status === 'FAILED');
+  if (!latestFailed) {
+    ElMessage.info('当前没有失败日志');
+    return;
+  }
+  filters.failedOnly = true;
+  void selectLog(latestFailed.logId);
 }
 
 function syncRouteState(patch: Record<string, string>) {
@@ -330,7 +448,7 @@ onMounted(async () => {
       <el-card shadow="hover">
         <p class="stat-label">近 7 天失败日志</p>
         <p class="stat-value">{{ recentFailedCount }}</p>
-        <el-button link type="primary" @click="filters.failedOnly = true">快速筛选</el-button>
+        <el-button link type="primary" @click="focusLatestFailed">定位最近失败</el-button>
       </el-card>
     </section>
 
@@ -350,6 +468,20 @@ onMounted(async () => {
             </div>
           </div>
         </template>
+        <div class="saved-view-toolbar">
+          <el-input v-model="savedViewName" class="saved-view-name" placeholder="保存为常用视图，例如：近 7 天失败日志" />
+          <el-select v-model="selectedViewId" class="saved-view-select" clearable placeholder="选择已保存视图">
+            <el-option
+              v-for="item in savedViews"
+              :key="item.id"
+              :label="item.name"
+              :value="item.id"
+            />
+          </el-select>
+          <el-button @click="applySelectedView">应用视图</el-button>
+          <el-button @click="saveCurrentView">保存当前视图</el-button>
+          <el-button link type="danger" @click="deleteSelectedView">删除视图</el-button>
+        </div>
         <el-form inline>
           <el-form-item label="关键字">
             <el-input v-model="filters.keyword" placeholder="任务名 / 摘要 / 错误信息" />
@@ -433,6 +565,7 @@ onMounted(async () => {
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="goToTasks(row)">任务页</el-button>
             <el-button link @click.stop="goToTarget(row)">来源页</el-button>
+            <el-button v-if="row.taskId" link type="danger" @click.stop="handleReplay(row)">回放</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -480,6 +613,7 @@ onMounted(async () => {
         <div class="detail-actions">
           <el-button type="primary" @click="goToTasks(selectedLog)">去任务调度继续观察</el-button>
           <el-button @click="goToTarget(selectedLog)">回到来源模块</el-button>
+          <el-button v-if="selectedLog.taskId" type="danger" plain @click="handleReplay(selectedLog)">一键回放</el-button>
           <el-button link type="primary" @click="goToDashboard">返回首页总览</el-button>
         </div>
       </div>

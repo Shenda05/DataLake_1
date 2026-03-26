@@ -4,11 +4,14 @@ import com.datalake.platform.common.security.SecurityUtils;
 import com.datalake.platform.common.web.ApiResponse;
 import com.datalake.platform.common.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -45,12 +48,44 @@ public class DataImportController {
     }
 
     @PostMapping("/database")
+    @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<?> importDatabase(
-        @RequestParam("sourceId") Long sourceId,
-        @RequestParam("tableName") String tableName,
+        @Valid @RequestBody DatabaseImportRequest body,
         HttpServletRequest request
     ) {
-        throw new IllegalArgumentException("当前分支暂未启用数据库表导入，请优先使用文件导入");
+        return ApiResponse.success(
+            dataImportService.importDatabaseTable(
+                body.sourceId(),
+                body.schemaName(),
+                body.tableName(),
+                body.datasetName(),
+                body.description(),
+                SecurityUtils.currentUser().userId()
+            ),
+            requestId(request)
+        );
+    }
+
+    @GetMapping("/database/tables")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<?> listDatabaseTables(
+        @RequestParam("sourceId") Long sourceId,
+        @RequestParam(value = "schemaName", required = false) String schemaName,
+        HttpServletRequest request
+    ) {
+        return ApiResponse.success(dataImportService.listDatabaseTables(sourceId, schemaName), requestId(request));
+    }
+
+    @GetMapping("/database/preview")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<?> previewDatabaseTable(
+        @RequestParam("sourceId") Long sourceId,
+        @RequestParam(value = "schemaName", required = false) String schemaName,
+        @RequestParam("tableName") String tableName,
+        @RequestParam(value = "limit", required = false) Integer limit,
+        HttpServletRequest request
+    ) {
+        return ApiResponse.success(dataImportService.previewDatabaseTable(sourceId, schemaName, tableName, limit), requestId(request));
     }
 
     @GetMapping("/history")
@@ -65,5 +100,14 @@ public class DataImportController {
 
     private String requestId(HttpServletRequest request) {
         return request.getAttribute(RequestIdFilter.REQUEST_ID_ATTR).toString();
+    }
+
+    public record DatabaseImportRequest(
+        @NotNull(message = "sourceId 不能为空") Long sourceId,
+        String schemaName,
+        @NotBlank(message = "tableName 不能为空") String tableName,
+        @NotBlank(message = "datasetName 不能为空") String datasetName,
+        String description
+    ) {
     }
 }

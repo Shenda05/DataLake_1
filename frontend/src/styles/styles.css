@@ -239,6 +239,22 @@ body {
   flex-wrap: wrap;
 }
 
+.saved-view-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.saved-view-name {
+  width: 280px;
+}
+
+.saved-view-select {
+  width: 260px;
+}
+
 .filter-summary {
   color: var(--ink-1);
   font-size: 14px;
