@@ -55,5 +55,30 @@ mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 
 ## 当前已确认的问题
 
-- 本机默认 `root / root` 凭据可能不适用，需要用实际 MySQL 账号覆盖
 - 如果文件导入任务需要重跑，`APP_STORAGE_ROOT` 中原文件必须仍然存在
+
+## 最近一次验证结果
+
+- 验证日期：`2026-03-27`
+- 验证环境：本机 MySQL，`mysql` profile，临时端口 `8093`
+- 实际使用凭据：已通过环境变量覆盖默认值完成启动验证
+
+### 已验证通过
+
+- MySQL 库 `data_lake_platform` 可创建并成功导入 [schema.sql](/Users/xyd/Desktop/DataLake/database/schema.sql)
+- 后端可在 `mysql` profile 下成功启动并连接本机 MySQL
+- [api-smoke-test.sh](/Users/xyd/Desktop/DataLake/scripts/api-smoke-test.sh) 已在 MySQL 环境跑通
+- 首页概览接口可返回真实统计
+- 用户与权限页相关接口 `roles / users / auth/profile` 可正常返回
+- 日志页相关接口 `task-logs / task-logs/{id}` 可正常返回
+- 管理员修改 `OPERATOR` 角色操作权限后，现有 `operator` 会话可实时感知权限变化
+
+### 本次关键结果
+
+- `dataSources=1`
+- `totalTasks=2`
+- `successTasks=2`
+- `userCount=2`
+- `logCount=2`
+- `operator` 角色在 MySQL 环境下已返回 `log.export`
+- 去掉 `log.export` 后，同一个 `operator` token 的 `/auth/profile` 返回会立刻移除该权限
