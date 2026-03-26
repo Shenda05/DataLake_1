@@ -34,7 +34,7 @@ public class UserController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_user.manage')")
     public ApiResponse<?> create(@Valid @RequestBody SaveUserRequest body, HttpServletRequest request) {
         return ApiResponse.success(
             authService.createUser(
@@ -46,7 +46,7 @@ public class UserController {
     }
 
     @PutMapping("/{userId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_user.manage')")
     public ApiResponse<?> update(@PathVariable Long userId, @Valid @RequestBody SaveUserRequest body, HttpServletRequest request) {
         return ApiResponse.success(
             authService.updateUser(
@@ -59,7 +59,7 @@ public class UserController {
     }
 
     @DeleteMapping("/{userId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_user.manage')")
     public ApiResponse<Void> delete(@PathVariable Long userId, HttpServletRequest request) {
         authService.deleteUser(userId, SecurityUtils.currentUser().userId());
         return ApiResponse.success(request.getAttribute(RequestIdFilter.REQUEST_ID_ATTR).toString());

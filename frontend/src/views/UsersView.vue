@@ -12,6 +12,7 @@ import {
   type RoleSummary,
   type UserSummary
 } from '../api/platform';
+import { useAuthStore } from '../stores/auth';
 
 type MenuOption = {
   key: string;
@@ -31,6 +32,16 @@ const MENU_OPTIONS: MenuOption[] = [
   { key: 'users', label: '用户与权限', adminOnly: true }
 ];
 
+const ACTION_OPTIONS = [
+  { key: 'source.manage', label: '数据源管理操作', adminOnly: true },
+  { key: 'import.database', label: '数据库表导入', adminOnly: true },
+  { key: 'dataset.delete', label: '数据集删除', adminOnly: true },
+  { key: 'user.manage', label: '用户管理', adminOnly: true },
+  { key: 'role.manage', label: '角色配置', adminOnly: true },
+  { key: 'log.replay', label: '日志回放' }
+];
+
+const authStore = useAuthStore();
 const users = ref<UserSummary[]>([]);
 const roles = ref<RoleSummary[]>([]);
 const loading = ref(false);
@@ -45,15 +56,21 @@ const form = reactive({
 });
 const roleForm = reactive({
   roleDesc: '',
-  menus: [] as string[]
+  menus: [] as string[],
+  actions: [] as string[]
 });
 
 const enabledCount = computed(() => users.value.filter((item) => item.status === 'ENABLED').length);
 const disabledCount = computed(() => users.value.filter((item) => item.status === 'DISABLED').length);
 const selectedRole = computed(() => roles.value.find((item) => item.roleId === selectedRoleId.value) ?? null);
 const selectedRoleIsAdmin = computed(() => selectedRole.value?.roleName === 'ADMIN');
+const canManageUsers = computed(() => authStore.hasAction('user.manage'));
+const canManageRoles = computed(() => authStore.hasAction('role.manage'));
 const selectedRoleMenuLabels = computed(() =>
   MENU_OPTIONS.filter((option) => roleForm.menus.includes(option.key)).map((option) => option.label)
+);
+const selectedRoleActionLabels = computed(() =>
+  ACTION_OPTIONS.filter((option) => roleForm.actions.includes(option.key)).map((option) => option.label)
 );
 
 async function loadData() {
@@ -88,6 +105,7 @@ function applyRole(role: RoleSummary | null) {
   selectedRoleId.value = role?.roleId ?? null;
   roleForm.roleDesc = role?.roleDesc ?? '';
   roleForm.menus = normalizeMenus(role?.menuPermissions ?? [], role?.roleName);
+  roleForm.actions = normalizeActions(role?.actionPermissions ?? [], role?.roleName);
 }
 
 function selectRole(role: RoleSummary) {
@@ -109,7 +127,18 @@ function normalizeMenus(menuKeys: string[], roleName?: string | null) {
   return MENU_OPTIONS.map((option) => option.key).filter((key) => allowedKeys.has(key) && menuKeys.includes(key));
 }
 
+function normalizeActions(actionKeys: string[], roleName?: string | null) {
+  const allowedKeys = new Set(
+    ACTION_OPTIONS.filter((option) => roleName === 'ADMIN' || !option.adminOnly).map((option) => option.key)
+  );
+  return ACTION_OPTIONS.map((option) => option.key).filter((key) => allowedKeys.has(key) && actionKeys.includes(key));
+}
+
 async function submit() {
+  if (!canManageUsers.value) {
+    ElMessage.warning('当前角色没有用户管理权限');
+    return;
+  }
   if (!form.username || !form.roleId || (!editingUserId.value && !form.password)) {
     ElMessage.warning('请填写用户名、角色，并在新增用户时输入密码');
     return;
@@ -139,6 +168,10 @@ async function submit() {
 }
 
 async function saveRole() {
+  if (!canManageRoles.value) {
+    ElMessage.warning('当前角色没有角色配置权限');
+    return;
+  }
   if (!selectedRole.value) {
     ElMessage.warning('请先选择一个角色');
     return;
@@ -151,13 +184,18 @@ async function saveRole() {
     ElMessage.warning('管理员角色必须保留“用户与权限”菜单');
     return;
   }
+  if (selectedRoleIsAdmin.value && (!roleForm.actions.includes('user.manage') || !roleForm.actions.includes('role.manage'))) {
+    ElMessage.warning('管理员角色必须保留用户管理和角色配置权限');
+    return;
+  }
   roleLoading.value = true;
   try {
     await updateRole(selectedRole.value.roleId, {
       roleDesc: roleForm.roleDesc,
-      menus: normalizeMenus(roleForm.menus, selectedRole.value.roleName)
+      menus: normalizeMenus(roleForm.menus, selectedRole.value.roleName),
+      actions: normalizeActions(roleForm.actions, selectedRole.value.roleName)
     });
-    ElMessage.success('角色菜单权限已更新，使用该角色重新登录后即可看到最新菜单');
+    ElMessage.success('角色权限已更新，现有会话会自动同步；如仍停留旧状态，可手动刷新页面确认');
     await loadData();
   } catch (error) {
     ElMessage.error(`角色权限保存失败: ${(error as Error).message}`);
@@ -167,6 +205,10 @@ async function saveRole() {
 }
 
 async function handleDelete(user: UserSummary) {
+  if (!canManageUsers.value) {
+    ElMessage.warning('当前角色没有用户管理权限');
+    return;
+  }
   try {
     await ElMessageBox.confirm(`确定删除用户 ${user.username} 吗？`, '删除确认', {
       type: 'warning'
@@ -228,15 +270,22 @@ onMounted(async () => {
             </div>
           </div>
         </template>
+        <el-alert
+          v-if="!canManageUsers"
+          class="notice-box"
+          title="当前角色只有用户查看权限，不能新增、编辑或删除用户。"
+          type="info"
+          :closable="false"
+        />
         <el-form label-position="top">
           <el-form-item label="用户名">
-            <el-input v-model="form.username" placeholder="请输入用户名" />
+            <el-input v-model="form.username" placeholder="请输入用户名" :disabled="!canManageUsers" />
           </el-form-item>
           <el-form-item :label="editingUserId ? '重置密码（留空则不修改）' : '登录密码'">
-            <el-input v-model="form.password" show-password placeholder="请输入密码" />
+            <el-input v-model="form.password" show-password placeholder="请输入密码" :disabled="!canManageUsers" />
           </el-form-item>
           <el-form-item label="角色">
-            <el-select v-model="form.roleId" placeholder="请选择角色">
+            <el-select v-model="form.roleId" placeholder="请选择角色" :disabled="!canManageUsers">
               <el-option
                 v-for="role in roles"
                 :key="role.roleId"
@@ -246,12 +295,12 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
           <el-form-item label="状态">
-            <el-radio-group v-model="form.status">
+            <el-radio-group v-model="form.status" :disabled="!canManageUsers">
               <el-radio-button label="ENABLED">ENABLED</el-radio-button>
               <el-radio-button label="DISABLED">DISABLED</el-radio-button>
             </el-radio-group>
           </el-form-item>
-          <el-button type="primary" :loading="loading" @click="submit">{{ editingUserId ? '保存修改' : '创建用户' }}</el-button>
+          <el-button type="primary" :loading="loading" :disabled="!canManageUsers" @click="submit">{{ editingUserId ? '保存修改' : '创建用户' }}</el-button>
         </el-form>
       </el-card>
 
@@ -269,8 +318,9 @@ onMounted(async () => {
           <el-table-column prop="createTime" label="创建时间" />
           <el-table-column label="操作" width="180">
             <template #default="{ row }">
-              <el-button link type="primary" @click="loadUser(row)">编辑</el-button>
-              <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+              <el-button v-if="canManageUsers" link type="primary" @click="loadUser(row)">编辑</el-button>
+              <el-button v-if="canManageUsers" link type="danger" @click="handleDelete(row)">删除</el-button>
+              <span v-if="!canManageUsers" class="inline-tip">仅查看</span>
             </template>
           </el-table-column>
         </el-table>
@@ -282,7 +332,7 @@ onMounted(async () => {
         <template #header>
           <div class="card-header">
             <span>系统角色</span>
-            <span class="inline-tip">菜单权限已改为从数据库读取，修改后重新登录即可验证。</span>
+            <span class="inline-tip">菜单和操作权限都从数据库读取，现有会话会定时同步。</span>
           </div>
         </template>
         <el-table :data="roles" stripe>
@@ -293,6 +343,15 @@ onMounted(async () => {
               <div class="tag-cluster">
                 <el-tag v-for="menuKey in row.menuPermissions" :key="`${row.roleId}-${menuKey}`" size="small" effect="plain">
                   {{ menuLabel(menuKey) }}
+                </el-tag>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作权限">
+            <template #default="{ row }">
+              <div class="tag-cluster">
+                <el-tag v-for="actionKey in row.actionPermissions" :key="`${row.roleId}-${actionKey}`" size="small" effect="plain" type="success">
+                  {{ ACTION_OPTIONS.find((item) => item.key === actionKey)?.label || actionKey }}
                 </el-tag>
               </div>
             </template>
@@ -318,14 +377,20 @@ onMounted(async () => {
           <el-alert
             type="info"
             :closable="false"
-            :title="`当前角色：${selectedRole.roleName}。管理员角色必须保留“用户与权限”菜单，普通角色不会展示该入口。`"
+            :title="`当前角色：${selectedRole.roleName}。管理员角色必须保留“用户与权限”菜单、用户管理和角色配置权限，普通角色不会展示这些管理入口。`"
+          />
+          <el-alert
+            v-if="!canManageRoles"
+            type="warning"
+            :closable="false"
+            title="当前会话只有角色查看权限，不能修改角色配置。"
           />
           <el-form label-position="top">
             <el-form-item label="角色标识">
               <el-input :model-value="selectedRole.roleName" disabled />
             </el-form-item>
             <el-form-item label="角色说明">
-              <el-input v-model="roleForm.roleDesc" placeholder="请输入角色说明" />
+              <el-input v-model="roleForm.roleDesc" placeholder="请输入角色说明" :disabled="!canManageRoles" />
             </el-form-item>
             <el-form-item label="菜单权限">
               <el-checkbox-group v-model="roleForm.menus" class="permission-grid">
@@ -333,7 +398,21 @@ onMounted(async () => {
                   v-for="option in MENU_OPTIONS"
                   :key="option.key"
                   :label="option.key"
-                  :disabled="Boolean(option.adminOnly && !selectedRoleIsAdmin)"
+                  :disabled="Boolean(!canManageRoles || (option.adminOnly && !selectedRoleIsAdmin))"
+                  class="permission-item"
+                >
+                  {{ option.label }}
+                  <span v-if="option.adminOnly" class="permission-hint">仅管理员</span>
+                </el-checkbox>
+              </el-checkbox-group>
+            </el-form-item>
+            <el-form-item label="操作权限">
+              <el-checkbox-group v-model="roleForm.actions" class="permission-grid">
+                <el-checkbox
+                  v-for="option in ACTION_OPTIONS"
+                  :key="option.key"
+                  :label="option.key"
+                  :disabled="Boolean(!canManageRoles || (option.adminOnly && !selectedRoleIsAdmin))"
                   class="permission-item"
                 >
                   {{ option.label }}
@@ -343,8 +422,9 @@ onMounted(async () => {
             </el-form-item>
           </el-form>
           <div class="inline-tip">当前已选择 {{ roleForm.menus.length }} 个菜单：{{ selectedRoleMenuLabels.join('、') || '未选择' }}</div>
+          <div class="inline-tip">当前已选择 {{ roleForm.actions.length }} 个操作：{{ selectedRoleActionLabels.join('、') || '未选择' }}</div>
           <div class="hero-actions">
-            <el-button type="primary" :loading="roleLoading" @click="saveRole">保存角色权限</el-button>
+            <el-button type="primary" :loading="roleLoading" :disabled="!canManageRoles" @click="saveRole">保存角色权限</el-button>
             <el-button @click="resetRoleForm">取消修改</el-button>
           </div>
         </div>

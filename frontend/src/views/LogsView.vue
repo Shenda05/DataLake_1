@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { isAuthExpiredError } from '../api/client';
 import { getTaskLogDetail, listTaskLogs, replayTaskLog, type TaskLogDetail, type TaskLogSummary } from '../api/platform';
+import { useAuthStore } from '../stores/auth';
 
 const LOG_FILTERS_KEY = 'data-lake-log-filters';
 const LOG_FILTER_VIEWS_KEY = 'data-lake-log-filter-views';
@@ -22,6 +23,7 @@ type SavedLogFilterView = {
 };
 const route = useRoute();
 const router = useRouter();
+const authStore = useAuthStore();
 const logs = ref<TaskLogSummary[]>([]);
 const selectedLog = ref<TaskLogDetail | null>(null);
 const lastSyncedAt = ref('');
@@ -80,6 +82,7 @@ const avgDuration = computed(() => {
   return Math.round(logs.value.reduce((sum, item) => sum + (item.duration || 0), 0) / logs.value.length);
 });
 const recentFailedCount = computed(() => logs.value.filter((item) => isRecentFailed(item)).length);
+const canReplayLogs = computed(() => authStore.hasAction('log.replay'));
 
 restoreFilters();
 loadSavedViews();
@@ -107,6 +110,10 @@ async function selectLog(logId: number, syncRoute = true) {
 }
 
 async function handleReplay(log?: TaskLogSummary | TaskLogDetail | null) {
+  if (!canReplayLogs.value) {
+    ElMessage.warning('当前角色没有日志回放权限');
+    return;
+  }
   if (!log?.taskId) {
     ElMessage.warning('当前日志不是调度任务生成，暂不支持回放');
     return;
@@ -565,7 +572,7 @@ onMounted(async () => {
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="goToTasks(row)">任务页</el-button>
             <el-button link @click.stop="goToTarget(row)">来源页</el-button>
-            <el-button v-if="row.taskId" link type="danger" @click.stop="handleReplay(row)">回放</el-button>
+            <el-button v-if="row.taskId && canReplayLogs" link type="danger" @click.stop="handleReplay(row)">回放</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -613,7 +620,7 @@ onMounted(async () => {
         <div class="detail-actions">
           <el-button type="primary" @click="goToTasks(selectedLog)">去任务调度继续观察</el-button>
           <el-button @click="goToTarget(selectedLog)">回到来源模块</el-button>
-          <el-button v-if="selectedLog.taskId" type="danger" plain @click="handleReplay(selectedLog)">一键回放</el-button>
+          <el-button v-if="selectedLog.taskId && canReplayLogs" type="danger" plain @click="handleReplay(selectedLog)">一键回放</el-button>
           <el-button link type="primary" @click="goToDashboard">返回首页总览</el-button>
         </div>
       </div>

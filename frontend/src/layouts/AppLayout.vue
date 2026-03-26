@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
+let profileSyncTimer: number | undefined;
 
 const menuItems = computed(() => [
   { label: '首页', key: 'dashboard', path: '/dashboard' },
@@ -19,6 +20,8 @@ const menuItems = computed(() => [
   { label: '用户与权限', key: 'users', path: '/users' }
 ].filter((item) => authStore.allowedMenus.includes(item.key as never)));
 
+const fallbackPath = computed(() => menuItems.value[0]?.path || '/dashboard');
+
 function navigate(path: string) {
   router.push(path);
 }
@@ -27,6 +30,37 @@ function logout() {
   authStore.logout();
   router.push('/login');
 }
+
+async function syncProfile() {
+  try {
+    await authStore.syncProfile(true);
+  } catch {
+    return;
+  }
+  ensureCurrentRouteAccessible();
+}
+
+function ensureCurrentRouteAccessible() {
+  const menuKey = route.meta.menuKey as string | undefined;
+  if (menuKey && !authStore.allowedMenus.includes(menuKey as never)) {
+    void router.replace(fallbackPath.value);
+  }
+}
+
+watch(() => authStore.allowedMenus.slice(), ensureCurrentRouteAccessible);
+
+onMounted(() => {
+  void syncProfile();
+  profileSyncTimer = window.setInterval(() => {
+    void syncProfile();
+  }, 30000);
+});
+
+onBeforeUnmount(() => {
+  if (profileSyncTimer) {
+    window.clearInterval(profileSyncTimer);
+  }
+});
 </script>
 
 <template>
@@ -68,4 +102,3 @@ function logout() {
     </el-container>
   </el-container>
 </template>
-

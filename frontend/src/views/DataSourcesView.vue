@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { isAuthExpiredError } from '../api/client';
 import { createDataSource, deleteDataSource, listDataSources, testDataSource, type DataSource } from '../api/platform';
+import { useAuthStore } from '../stores/auth';
 
+const authStore = useAuthStore();
 const dataSources = ref<DataSource[]>([]);
 const form = reactive({
   sourceName: '',
@@ -15,12 +17,17 @@ const form = reactive({
   password: '',
   description: ''
 });
+const canManageSources = computed(() => authStore.hasAction('source.manage'));
 
 async function loadData() {
   dataSources.value = await listDataSources();
 }
 
 async function submit() {
+  if (!canManageSources.value) {
+    ElMessage.warning('当前角色没有数据源管理权限');
+    return;
+  }
   if (!form.sourceName || !form.sourceType) {
     ElMessage.warning('请填写数据源名称和类型');
     return;
@@ -36,6 +43,10 @@ async function submit() {
 }
 
 async function handleTest(sourceId: number) {
+  if (!canManageSources.value) {
+    ElMessage.warning('当前角色没有数据源管理权限');
+    return;
+  }
   try {
     const result = await testDataSource(sourceId);
     ElMessage.success(result.message);
@@ -45,6 +56,10 @@ async function handleTest(sourceId: number) {
 }
 
 async function handleDelete(sourceId: number) {
+  if (!canManageSources.value) {
+    ElMessage.warning('当前角色没有数据源管理权限');
+    return;
+  }
   try {
     await deleteDataSource(sourceId);
     ElMessage.success('数据源已删除');
@@ -68,7 +83,7 @@ onMounted(async () => {
 
 <template>
   <div class="page-grid two-column-grid">
-    <el-card shadow="never">
+    <el-card v-if="canManageSources" shadow="never">
       <template #header>
         <div class="card-header">
           <span>新增数据源</span>
@@ -107,6 +122,10 @@ onMounted(async () => {
       </el-form>
     </el-card>
 
+    <el-card v-else shadow="never">
+      <el-empty description="当前角色只有数据源查看权限，不能新增、测试或删除数据源。" />
+    </el-card>
+
     <el-card shadow="never">
       <template #header>
         <div class="card-header">
@@ -121,8 +140,9 @@ onMounted(async () => {
         <el-table-column prop="description" label="说明" />
         <el-table-column label="操作" width="220">
           <template #default="{ row }">
-            <el-button link type="success" @click="handleTest(row.sourceId)">测试连接</el-button>
-            <el-button link type="danger" @click="handleDelete(row.sourceId)">删除</el-button>
+            <el-button v-if="canManageSources" link type="success" @click="handleTest(row.sourceId)">测试连接</el-button>
+            <el-button v-if="canManageSources" link type="danger" @click="handleDelete(row.sourceId)">删除</el-button>
+            <span v-if="!canManageSources" class="inline-tip">仅查看</span>
           </template>
         </el-table-column>
       </el-table>

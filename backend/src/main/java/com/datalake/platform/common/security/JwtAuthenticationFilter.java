@@ -1,5 +1,6 @@
 package com.datalake.platform.common.security;
 
+import com.datalake.platform.auth.AuthService;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -17,9 +18,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final AuthService authService;
 
-    public JwtAuthenticationFilter(JwtService jwtService) {
+    public JwtAuthenticationFilter(JwtService jwtService, AuthService authService) {
         this.jwtService = jwtService;
+        this.authService = authService;
     }
 
     @Override
@@ -40,12 +43,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 Claims claims = jwtService.parseClaims(authorization.substring(7));
                 Long userId = Long.valueOf(claims.get("userId").toString());
                 String username = claims.getSubject();
-                String role = claims.get("role", String.class);
-                AuthUser authUser = new AuthUser(userId, username, role, List.of("ROLE_" + role));
+                AuthUser authUser = authService.authenticateSession(userId, username);
                 UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                     authUser,
                     null,
-                    List.of(new SimpleGrantedAuthority("ROLE_" + role))
+                    authUser.authorities().stream().map(SimpleGrantedAuthority::new).toList()
                 );
                 SecurityContextHolder.getContext().setAuthentication(authentication);
             } catch (Exception exception) {

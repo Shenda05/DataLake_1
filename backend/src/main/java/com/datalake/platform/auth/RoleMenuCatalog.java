@@ -19,6 +19,14 @@ public final class RoleMenuCatalog {
     );
 
     private static final List<String> ADMIN_ONLY_MENUS = List.of("users");
+    public static final List<String> ALL_ACTIONS = List.of(
+        "source.manage",
+        "import.database",
+        "dataset.delete",
+        "user.manage",
+        "role.manage",
+        "log.replay"
+    );
 
     private RoleMenuCatalog() {
     }
@@ -43,6 +51,28 @@ public final class RoleMenuCatalog {
 
     public static String serializeConfiguredMenus(String roleName, List<String> menus) {
         return String.join(",", validate(roleName, menus));
+    }
+
+    public static List<String> defaultActionsForRole(String roleName) {
+        if ("ADMIN".equalsIgnoreCase(roleName)) {
+            return ALL_ACTIONS;
+        }
+        return List.of("log.replay");
+    }
+
+    public static List<String> resolveStoredActions(String roleName, String serializedActions) {
+        if (serializedActions == null) {
+            return defaultActionsForRole(roleName);
+        }
+        try {
+            return validateActions(roleName, Arrays.stream(serializedActions.split(",")).map(String::trim).filter(item -> !item.isBlank()).toList());
+        } catch (IllegalArgumentException ex) {
+            return defaultActionsForRole(roleName);
+        }
+    }
+
+    public static String serializeConfiguredActions(String roleName, List<String> actions) {
+        return String.join(",", validateActions(roleName, actions));
     }
 
     public static List<String> validate(String roleName, List<String> menus) {
@@ -70,5 +100,32 @@ public final class RoleMenuCatalog {
             throw new IllegalArgumentException("管理员角色必须保留“用户与权限”菜单");
         }
         return orderedMenus;
+    }
+
+    public static List<String> validateActions(String roleName, List<String> actions) {
+        if (actions == null) {
+            return defaultActionsForRole(roleName);
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String action : actions) {
+            if (action == null || action.isBlank()) {
+                continue;
+            }
+            if (!ALL_ACTIONS.contains(action)) {
+                throw new IllegalArgumentException("存在不支持的操作权限: " + action);
+            }
+            if (!"ADMIN".equalsIgnoreCase(roleName) && List.of("source.manage", "import.database", "dataset.delete", "user.manage", "role.manage").contains(action)) {
+                throw new IllegalArgumentException("当前角色不能分配管理类操作权限: " + action);
+            }
+            normalized.add(action);
+        }
+        List<String> orderedActions = ALL_ACTIONS.stream().filter(normalized::contains).toList();
+        if ("ADMIN".equalsIgnoreCase(roleName)) {
+            List<String> requiredAdminActions = List.of("user.manage", "role.manage");
+            if (!orderedActions.containsAll(requiredAdminActions)) {
+                throw new IllegalArgumentException("管理员角色必须保留用户和角色管理权限");
+            }
+        }
+        return orderedActions;
     }
 }

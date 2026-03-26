@@ -32,17 +32,18 @@ public class RoleController {
     }
 
     @PutMapping("/{roleId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_role.manage')")
     public ApiResponse<?> update(@PathVariable Long roleId, @Valid @RequestBody SaveRoleRequest body, HttpServletRequest request) {
         return ApiResponse.success(
-            authService.updateRole(roleId, new AuthService.SaveRoleCommand(body.roleDesc(), body.menus())),
+            authService.updateRole(roleId, new AuthService.SaveRoleCommand(body.roleDesc(), body.menus(), body.actions())),
             request.getAttribute(RequestIdFilter.REQUEST_ID_ATTR).toString()
         );
     }
 
     public record SaveRoleRequest(
         String roleDesc,
-        @NotEmpty(message = "menus 不能为空") List<@NotBlank(message = "menus 不能包含空值") String> menus
+        @NotEmpty(message = "menus 不能为空") List<@NotBlank(message = "menus 不能包含空值") String> menus,
+        List<@NotBlank(message = "actions 不能包含空值") String> actions
     ) {
     }
 }

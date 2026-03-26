@@ -30,7 +30,7 @@ const previewFilters = reactive({
   field: '',
   keyword: ''
 });
-const isAdmin = computed(() => authStore.profile?.role === 'ADMIN');
+const canDeleteDataset = computed(() => authStore.hasAction('dataset.delete'));
 
 async function loadDatasets() {
   datasets.value = await listDatasets();
@@ -97,6 +97,10 @@ async function handleExport(format: 'csv' | 'json' | 'xlsx') {
 }
 
 async function handleDelete(dataset: DatasetSummary) {
+  if (!canDeleteDataset.value) {
+    ElMessage.warning('当前角色没有数据集删除权限');
+    return;
+  }
   try {
     await ElMessageBox.confirm(`确定删除数据集 ${dataset.datasetName} 吗？`, '删除确认', { type: 'warning' });
     await deleteDataset(dataset.datasetId);
@@ -137,7 +141,7 @@ onMounted(async () => {
         <el-table-column prop="fieldCount" label="字段数" width="120" />
         <el-table-column prop="status" label="状态" width="120" />
         <el-table-column prop="creator" label="创建人" width="120" />
-        <el-table-column v-if="isAdmin" label="操作" width="120">
+        <el-table-column v-if="canDeleteDataset" label="操作" width="120">
           <template #default="{ row }">
             <el-button link type="danger" @click.stop="handleDelete(row)">删除</el-button>
           </template>

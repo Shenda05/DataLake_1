@@ -34,7 +34,7 @@ public class DatasetController {
     }
 
     @DeleteMapping("/api/datasets/{datasetId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_dataset.delete')")
     public ApiResponse<Void> delete(@PathVariable Long datasetId, HttpServletRequest request) {
         datasetService.delete(datasetId);
         return ApiResponse.success(requestId(request));

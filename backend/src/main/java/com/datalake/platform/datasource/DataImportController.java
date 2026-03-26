@@ -48,7 +48,7 @@ public class DataImportController {
     }
 
     @PostMapping("/database")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_import.database')")
     public ApiResponse<?> importDatabase(
         @Valid @RequestBody DatabaseImportRequest body,
         HttpServletRequest request
@@ -67,7 +67,7 @@ public class DataImportController {
     }
 
     @GetMapping("/database/tables")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_import.database')")
     public ApiResponse<?> listDatabaseTables(
         @RequestParam("sourceId") Long sourceId,
         @RequestParam(value = "schemaName", required = false) String schemaName,
@@ -77,7 +77,7 @@ public class DataImportController {
     }
 
     @GetMapping("/database/preview")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_import.database')")
     public ApiResponse<?> previewDatabaseTable(
         @RequestParam("sourceId") Long sourceId,
         @RequestParam(value = "schemaName", required = false) String schemaName,

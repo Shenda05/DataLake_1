@@ -6,6 +6,7 @@ export type LoginResult = {
   role: 'ADMIN' | 'OPERATOR';
   displayName: string;
   menus: string[];
+  actions: string[];
 };
 
 export type DataSource = {
@@ -172,6 +173,7 @@ export type RoleSummary = {
   roleName: string;
   roleDesc?: string | null;
   menuPermissions: string[];
+  actionPermissions: string[];
 };
 
 export type UserSummary = {
@@ -187,6 +189,10 @@ export type UserSummary = {
 
 export function login(payload: { username: string; password: string }) {
   return apiPost<LoginResult>('/auth/login', payload);
+}
+
+export function getAuthProfile() {
+  return apiGet<Omit<LoginResult, 'token'>>('/auth/profile');
 }
 
 export function getOverview() {
@@ -428,7 +434,7 @@ export function listRoles() {
   return apiGet<RoleSummary[]>('/roles');
 }
 
-export function updateRole(roleId: number, payload: { roleDesc?: string; menus: string[] }) {
+export function updateRole(roleId: number, payload: { roleDesc?: string; menus: string[]; actions?: string[] }) {
   return apiPut<RoleSummary>(`/roles/${roleId}`, payload);
 }
 

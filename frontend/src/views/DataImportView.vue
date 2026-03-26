@@ -40,6 +40,7 @@ const databaseForm = reactive({
 const adminDatabaseSources = computed(() => dataSources.value.filter((item) => item.sourceType === 'MYSQL'));
 const fileSources = computed(() => dataSources.value.filter((item) => item.sourceType === 'FILE' || item.sourceType === 'MYSQL'));
 const previewColumns = computed(() => databasePreview.value?.columns ?? []);
+const canImportDatabase = computed(() => authStore.hasAction('import.database'));
 
 async function loadBaseData() {
   dataSources.value = await listDataSources();
@@ -52,7 +53,7 @@ async function loadBaseData() {
     const matched = adminDatabaseSources.value[0];
     databaseForm.schemaName = matched.dbName || '';
   }
-  if (authStore.profile?.role === 'ADMIN' && databaseForm.sourceId) {
+  if (canImportDatabase.value && databaseForm.sourceId) {
     await loadDatabaseTables();
   }
 }
@@ -86,6 +87,11 @@ async function submitFileImport() {
 }
 
 async function loadDatabaseTables() {
+  if (!canImportDatabase.value) {
+    databaseTables.value = [];
+    databasePreview.value = null;
+    return;
+  }
   if (!databaseForm.sourceId) {
     databaseTables.value = [];
     return;
@@ -106,6 +112,10 @@ async function loadDatabaseTables() {
 }
 
 async function loadDatabasePreview() {
+  if (!canImportDatabase.value) {
+    databasePreview.value = null;
+    return;
+  }
   if (!databaseForm.sourceId || !databaseForm.tableName) {
     databasePreview.value = null;
     return;
@@ -130,6 +140,10 @@ async function loadDatabasePreview() {
 }
 
 async function submitDatabaseImport() {
+  if (!canImportDatabase.value) {
+    ElMessage.warning('当前角色没有数据库表导入权限');
+    return;
+  }
   if (!databaseForm.sourceId || !databaseForm.tableName || !databaseForm.datasetName) {
     ElMessage.warning('请先选择数据库表并填写数据集名称');
     return;
@@ -178,6 +192,16 @@ watch(
       await loadDatabasePreview();
     }
   }
+);
+
+watch(
+  canImportDatabase,
+  (value) => {
+    if (!value && activeTab.value === 'database') {
+      activeTab.value = 'file';
+    }
+  },
+  { immediate: true }
 );
 
 onMounted(async () => {
@@ -234,7 +258,7 @@ onMounted(async () => {
           </div>
         </el-tab-pane>
 
-        <el-tab-pane v-if="authStore.profile?.role === 'ADMIN'" label="数据库表导入" name="database">
+        <el-tab-pane v-if="canImportDatabase" label="数据库表导入" name="database">
           <div class="two-column-grid">
             <el-form label-position="top">
               <el-form-item label="数据库数据源">
@@ -299,6 +323,14 @@ onMounted(async () => {
           </div>
         </el-tab-pane>
       </el-tabs>
+      <el-alert
+        v-if="!canImportDatabase"
+        class="notice-box"
+        title="当前角色没有数据库表导入权限"
+        description="你仍然可以继续使用文件导入；如果需要从 MYSQL 表导入，请在“用户与权限”中为当前角色分配 import.database 操作权限。"
+        type="info"
+        :closable="false"
+      />
     </el-card>
 
     <el-card shadow="never">

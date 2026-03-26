@@ -32,26 +32,26 @@ public class DataSourceController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_source.manage')")
     public ApiResponse<?> create(@Valid @RequestBody UpsertDataSourceRequest body, HttpServletRequest request) {
         return ApiResponse.success(dataSourceService.create(body, SecurityUtils.currentUser().userId()), requestId(request));
     }
 
     @PutMapping("/{sourceId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_source.manage')")
     public ApiResponse<?> update(@PathVariable Long sourceId, @Valid @RequestBody UpsertDataSourceRequest body, HttpServletRequest request) {
         return ApiResponse.success(dataSourceService.update(sourceId, body), requestId(request));
     }
 
     @DeleteMapping("/{sourceId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_source.manage')")
     public ApiResponse<Void> delete(@PathVariable Long sourceId, HttpServletRequest request) {
         dataSourceService.delete(sourceId);
         return ApiResponse.success(requestId(request));
     }
 
     @PostMapping("/{sourceId}/test")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAuthority('ACTION_source.manage')")
     public ApiResponse<?> testConnection(@PathVariable Long sourceId, HttpServletRequest request) {
         return ApiResponse.success(dataSourceService.test(sourceId), requestId(request));
     }

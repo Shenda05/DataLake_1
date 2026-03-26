@@ -7,7 +7,7 @@ public record LoginResponse(
     String username,
     String role,
     String displayName,
-    List<String> menus
+    List<String> menus,
+    List<String> actions
 ) {
 }
-

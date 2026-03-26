@@ -50,13 +50,20 @@ const router = createRouter({
   routes
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore();
   if (to.meta.title) {
     document.title = `${to.meta.title} - 数据湖管理平台`;
   }
   if (to.meta.requiresAuth && !authStore.isLoggedIn) {
     return { name: 'login' };
+  }
+  if (authStore.isLoggedIn) {
+    try {
+      await authStore.syncProfile();
+    } catch {
+      // A 401 will already trigger the client-side auth-expired redirect.
+    }
   }
   if (authStore.isLoggedIn && authStore.allowedMenus.length === 0) {
     authStore.logout();

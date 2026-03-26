@@ -29,9 +29,9 @@ public class AuthService {
     }
 
     public LoginResponse login(LoginRequest request) {
-        UserAccount user = jdbcTemplate.query(
+        SessionAccount user = jdbcTemplate.query(
             """
-                select u.user_id,u.username,u.password,u.status,r.role_name,r.role_desc,r.menu_permissions
+                select u.user_id,u.username,u.password,u.status,r.role_name,r.role_desc,r.menu_permissions,r.action_permissions
                 from sys_user u
                 join sys_role r on r.role_id = u.role_id
                 where u.username = ?
@@ -43,13 +43,7 @@ public class AuthService {
             throw new BadCredentialsException("用户名或密码错误");
         }
         String token = jwtService.generateToken(user.userId(), user.username(), user.roleName());
-        return new LoginResponse(
-            token,
-            user.username(),
-            user.roleName(),
-            user.roleDesc() == null || user.roleDesc().isBlank() ? user.roleName() : user.roleDesc(),
-            RoleMenuCatalog.resolveStoredMenus(user.roleName(), user.menuPermissions())
-        );
+        return toLoginResponse(user, token);
     }
 
     public List<UserSummary> listUsers() {
@@ -75,7 +69,7 @@ public class AuthService {
 
     public List<RoleSummary> listRoles() {
         return jdbcTemplate.query(
-            "select role_id, role_name, role_desc, menu_permissions from sys_role order by role_id",
+            "select role_id, role_name, role_desc, menu_permissions, action_permissions from sys_role order by role_id",
             (rs, rowNum) -> mapRoleSummary(rs)
         );
     }
@@ -83,17 +77,41 @@ public class AuthService {
     public RoleSummary updateRole(Long roleId, SaveRoleCommand command) {
         RoleSummary existing = getRole(roleId);
         String serializedMenus = RoleMenuCatalog.serializeConfiguredMenus(existing.roleName(), command.menuPermissions());
+        String serializedActions = RoleMenuCatalog.serializeConfiguredActions(existing.roleName(), command.actionPermissions());
         jdbcTemplate.update(
             """
                 update sys_role
-                set role_desc = ?, menu_permissions = ?
+                set role_desc = ?, menu_permissions = ?, action_permissions = ?
                 where role_id = ?
             """,
             normalizeRoleDesc(command.roleDesc()),
             serializedMenus,
+            serializedActions,
             roleId
         );
         return getRole(roleId);
+    }
+
+    public LoginResponse currentProfile(AuthUser currentUser) {
+        return toLoginResponse(loadSessionAccount(currentUser.userId(), currentUser.username()), null);
+    }
+
+    public AuthUser authenticateSession(Long userId, String username) {
+        SessionAccount account = loadSessionAccount(userId, username);
+        if (!"ENABLED".equalsIgnoreCase(account.status())) {
+            throw new BadCredentialsException("当前账号已被停用");
+        }
+        List<String> actions = RoleMenuCatalog.resolveStoredActions(account.roleName(), account.actionPermissions());
+        List<String> authorities = buildAuthorities(account.roleName(), actions);
+        return new AuthUser(
+            account.userId(),
+            account.username(),
+            account.roleName(),
+            resolveDisplayName(account),
+            RoleMenuCatalog.resolveStoredMenus(account.roleName(), account.menuPermissions()),
+            actions,
+            authorities
+        );
     }
 
     public UserSummary createUser(SaveUserCommand command, Long operatorUserId) {
@@ -237,7 +255,7 @@ public class AuthService {
 
     private RoleSummary getRole(Long roleId) {
         RoleSummary role = jdbcTemplate.query(
-            "select role_id, role_name, role_desc, menu_permissions from sys_role where role_id = ?",
+            "select role_id, role_name, role_desc, menu_permissions, action_permissions from sys_role where role_id = ?",
             rs -> rs.next() ? mapRoleSummary(rs) : null,
             roleId
         );
@@ -251,15 +269,16 @@ public class AuthService {
         return Timestamp.from(java.time.Instant.now());
     }
 
-    private UserAccount mapAccount(ResultSet rs) throws SQLException {
-        return new UserAccount(
+    private SessionAccount mapAccount(ResultSet rs) throws SQLException {
+        return new SessionAccount(
             rs.getLong("user_id"),
             rs.getString("username"),
             rs.getString("password"),
             rs.getString("status"),
             rs.getString("role_name"),
             rs.getString("role_desc"),
-            rs.getString("menu_permissions")
+            rs.getString("menu_permissions"),
+            rs.getString("action_permissions")
         );
     }
 
@@ -268,7 +287,8 @@ public class AuthService {
             rs.getLong("role_id"),
             rs.getString("role_name"),
             rs.getString("role_desc"),
-            RoleMenuCatalog.resolveStoredMenus(rs.getString("role_name"), rs.getString("menu_permissions"))
+            RoleMenuCatalog.resolveStoredMenus(rs.getString("role_name"), rs.getString("menu_permissions")),
+            RoleMenuCatalog.resolveStoredActions(rs.getString("role_name"), rs.getString("action_permissions"))
         );
     }
 
@@ -276,7 +296,54 @@ public class AuthService {
         return roleDesc == null || roleDesc.isBlank() ? null : roleDesc.trim();
     }
 
-    private record UserAccount(Long userId, String username, String password, String status, String roleName, String roleDesc, String menuPermissions) {
+    private SessionAccount loadSessionAccount(Long userId, String username) {
+        SessionAccount account = jdbcTemplate.query(
+            """
+                select u.user_id,u.username,u.password,u.status,r.role_name,r.role_desc,r.menu_permissions,r.action_permissions
+                from sys_user u
+                join sys_role r on r.role_id = u.role_id
+                where u.user_id = ? and u.username = ?
+            """,
+            rs -> rs.next() ? mapAccount(rs) : null,
+            userId,
+            username
+        );
+        if (account == null) {
+            throw new BadCredentialsException("当前登录用户不存在或已失效");
+        }
+        return account;
+    }
+
+    private LoginResponse toLoginResponse(SessionAccount user, String token) {
+        return new LoginResponse(
+            token,
+            user.username(),
+            user.roleName(),
+            resolveDisplayName(user),
+            RoleMenuCatalog.resolveStoredMenus(user.roleName(), user.menuPermissions()),
+            RoleMenuCatalog.resolveStoredActions(user.roleName(), user.actionPermissions())
+        );
+    }
+
+    private String resolveDisplayName(SessionAccount account) {
+        return account.roleDesc() == null || account.roleDesc().isBlank() ? account.roleName() : account.roleDesc();
+    }
+
+    private List<String> buildAuthorities(String roleName, List<String> actions) {
+        List<String> actionAuthorities = actions.stream().map(item -> "ACTION_" + item).toList();
+        return java.util.stream.Stream.concat(java.util.stream.Stream.of("ROLE_" + roleName), actionAuthorities.stream()).toList();
+    }
+
+    private record SessionAccount(
+        Long userId,
+        String username,
+        String password,
+        String status,
+        String roleName,
+        String roleDesc,
+        String menuPermissions,
+        String actionPermissions
+    ) {
     }
 
     public record UserSummary(
@@ -291,12 +358,12 @@ public class AuthService {
     ) {
     }
 
-    public record RoleSummary(Long roleId, String roleName, String roleDesc, List<String> menuPermissions) {
+    public record RoleSummary(Long roleId, String roleName, String roleDesc, List<String> menuPermissions, List<String> actionPermissions) {
     }
 
     public record SaveUserCommand(String username, String password, Long roleId, String status) {
     }
 
-    public record SaveRoleCommand(String roleDesc, List<String> menuPermissions) {
+    public record SaveRoleCommand(String roleDesc, List<String> menuPermissions, List<String> actionPermissions) {
     }
 }

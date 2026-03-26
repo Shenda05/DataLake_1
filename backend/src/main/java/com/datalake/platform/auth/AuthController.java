@@ -34,7 +34,7 @@ public class AuthController {
     @GetMapping("/profile")
     public ApiResponse<?> profile(HttpServletRequest request) {
         return ApiResponse.success(
-            SecurityUtils.currentUser(),
+            authService.currentProfile(SecurityUtils.currentUser()),
             requestId(request)
         );
     }

@@ -4,6 +4,7 @@ import com.datalake.platform.common.security.SecurityUtils;
 import com.datalake.platform.common.web.ApiResponse;
 import com.datalake.platform.common.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,6 +34,7 @@ public class TaskLogController {
     }
 
     @PostMapping("/{logId}/replay")
+    @PreAuthorize("hasAuthority('ACTION_log.replay')")
     public ApiResponse<?> replay(@PathVariable Long logId, HttpServletRequest request) {
         return ApiResponse.success(taskService.replayFromLog(logId, SecurityUtils.currentUser().userId()), requestId(request));
     }
