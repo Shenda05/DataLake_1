@@ -12,6 +12,7 @@
 - H2 默认配置端到端冒烟
 - MySQL 本地连通性检查
 - MySQL profile 真实启动与权限联调
+- MySQL 回归辅助脚本验证
 
 ## 实际执行结果
 
@@ -96,6 +97,35 @@ mysql -h127.0.0.1 -P3306 -uroot -proot
 - `mysql profile` 已经跑通到真实 MySQL 启动、主链路冒烟、首页/权限页/日志页接口验证和实时权限同步验证
 - 当前剩余的 MySQL 侧缺口主要是浏览器层面的人工 UI 回归，而不是后端联通或权限链本身
 
+### 5. MySQL 回归辅助脚本验证
+
+`2026-03-27` 已在 `8093` 端口继续执行 [mysql-regression-check.sh](/Users/xyd/Desktop/DataLake/scripts/mysql-regression-check.sh)，用于把以下高价值场景串成一条可重复脚本：
+
+1. 复用 [api-smoke-test.sh](/Users/xyd/Desktop/DataLake/scripts/api-smoke-test.sh) 生成真实任务和日志数据
+2. 创建 MySQL 数据源并测试连通性
+3. 列出数据库表、预览表数据并导入为数据集
+4. 校验首页概览、用户与权限、日志页相关接口
+5. 校验数据集 `xlsx` 导出与查询结果 `xlsx` 导出
+6. 触发失败日志回放并确认日志条数增长
+7. 切换 `OPERATOR` 的 `log.export` 权限并确认现有会话实时感知，再恢复原权限
+
+关键结果：
+
+- `sourceId=3`
+- `importedDatasetId=11`
+- `importedTable=operator_def`
+- `userCount=2`
+- `logCountBeforeReplay=8`
+- `logCountAfterReplay=9`
+- 首页概览返回 `dataSources=3`、`datasets=11`、`totalTasks=4`、`successTasks=8`
+- `operator` 角色当前返回菜单 `dashboard / data-sources / imports / datasets / queries / governance / tasks / logs`
+- `operator` 角色当前返回操作权限 `governance.manage / governance.execute / task.manage / task.trigger / dataset.export / query.export / log.export / log.replay`
+
+结论：
+
+- MySQL 环境下的“数据库表导入 -> xlsx 导出 -> 日志回放 -> 权限实时同步”脚本化回归已经跑通
+- 当前剩余缺口进一步收敛为浏览器层面的人工点击与文件人工打开验证
+
 ## 已覆盖的计划项
 
 - 登录鉴权
@@ -113,8 +143,8 @@ mysql -h127.0.0.1 -P3306 -uroot -proot
 ## 尚未完成的实机验证
 
 - 浏览器层面的人工 UI 回归
-- 失败日志回放的完整人工场景验证
 - 数据库表导入和 Excel 导出的人工打开验证
+- 首页快捷入口、日志页按钮级授权和权限页实时同步的双浏览器人工验证
 
 ## 建议的下一轮验证顺序
 

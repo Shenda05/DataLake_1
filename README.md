@@ -11,8 +11,8 @@
 - 任务页和日志页现在支持筛选条件记忆、URL 查询参数回填，并补齐了执行目标、时间范围、近 7 天失败记录等组合筛选；两页都支持保存常用筛选视图，日志页额外支持失败日志一键回放和按当前筛选结果导出。
 - `backend/`：Spring Boot 后端，已实现 JWT 登录鉴权、仪表盘聚合、数据源持久化、文件/数据库表导入、元数据生成、查询分析、治理执行、任务 CRUD、手动触发、任务日志和失败日志回放。
 - `database/`：包含 `sys_user`、`sys_role`、`data_source`、`import_record`、`data_set`、`meta_field` 等表结构。
-- `docs/`：接口约定、架构说明、周计划、测试计划、测试报告、用户手册、演示脚本和 PPT 大纲。
-- `scripts/`：提供一份可直接执行的后端接口冒烟脚本。
+- `docs/`：接口约定、架构说明、周计划、测试计划、测试报告、用户手册、演示脚本、浏览器回归检查单和 PPT 大纲。
+- `scripts/`：提供后端接口冒烟脚本，以及面向 MySQL 环境的回归辅助脚本。
 - `storage/`：运行时自动生成，用于保存上传原文件。
 
 ## 当前主链路
@@ -108,6 +108,23 @@ bash scripts/api-smoke-test.sh
 ```bash
 BASE_URL=http://127.0.0.1:8086/api bash scripts/api-smoke-test.sh
 ```
+
+如果要补齐 MySQL 环境下的数据库表导入、`xlsx` 导出、日志回放和权限同步回归，可执行：
+
+```bash
+BASE_URL=http://127.0.0.1:8093/api \
+MYSQL_SOURCE_USER='root' \
+MYSQL_SOURCE_PASSWORD='你的 MySQL 密码' \
+bash scripts/mysql-regression-check.sh
+```
+
+最近一次已验证通过的回归结果见 [mysql-e2e-checklist.md](/Users/xyd/Desktop/DataLake/docs/mysql-e2e-checklist.md) 和 [test-report.md](/Users/xyd/Desktop/DataLake/docs/test-report.md)。`2026-03-27` 的样本结果包含：
+
+- `importedTable=operator_def`
+- `importedDatasetId=11`
+- `logCountBeforeReplay=8`
+- `logCountAfterReplay=9`
+- `operatorActions` 已覆盖 `dataset.export / query.export / log.export / log.replay`
 
 ## 目录结构
 

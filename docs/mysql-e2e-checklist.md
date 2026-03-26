@@ -53,6 +53,11 @@ mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 - 创建并触发任务成功
 - 日志中可看到成功/失败摘要
 
+### 5. 回归辅助脚本
+
+- 执行 [mysql-regression-check.sh](/Users/xyd/Desktop/DataLake/scripts/mysql-regression-check.sh)
+- 确认脚本已覆盖数据库表导入、`xlsx` 导出、日志回放和权限实时同步
+
 ## 当前已确认的问题
 
 - 如果文件导入任务需要重跑，`APP_STORAGE_ROOT` 中原文件必须仍然存在
@@ -68,17 +73,25 @@ mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 - MySQL 库 `data_lake_platform` 可创建并成功导入 [schema.sql](/Users/xyd/Desktop/DataLake/database/schema.sql)
 - 后端可在 `mysql` profile 下成功启动并连接本机 MySQL
 - [api-smoke-test.sh](/Users/xyd/Desktop/DataLake/scripts/api-smoke-test.sh) 已在 MySQL 环境跑通
+- [mysql-regression-check.sh](/Users/xyd/Desktop/DataLake/scripts/mysql-regression-check.sh) 已在 MySQL 环境跑通
 - 首页概览接口可返回真实统计
 - 用户与权限页相关接口 `roles / users / auth/profile` 可正常返回
 - 日志页相关接口 `task-logs / task-logs/{id}` 可正常返回
 - 管理员修改 `OPERATOR` 角色操作权限后，现有 `operator` 会话可实时感知权限变化
+- 数据库表可列出、可预览并可导入为真实数据集
+- 数据集和查询结果的 `xlsx` 导出文件结构校验通过
+- 日志回放后日志条数会立即增长
 
 ### 本次关键结果
 
-- `dataSources=1`
-- `totalTasks=2`
-- `successTasks=2`
+- `dataSources=3`
+- `datasets=11`
+- `totalTasks=4`
+- `successTasks=8`
 - `userCount=2`
-- `logCount=2`
+- `importedTable=operator_def`
+- `importedDatasetId=11`
+- `logCountBeforeReplay=8`
+- `logCountAfterReplay=9`
 - `operator` 角色在 MySQL 环境下已返回 `log.export`
 - 去掉 `log.export` 后，同一个 `operator` token 的 `/auth/profile` 返回会立刻移除该权限
