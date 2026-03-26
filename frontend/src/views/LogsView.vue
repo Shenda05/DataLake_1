@@ -82,6 +82,7 @@ const avgDuration = computed(() => {
   return Math.round(logs.value.reduce((sum, item) => sum + (item.duration || 0), 0) / logs.value.length);
 });
 const recentFailedCount = computed(() => logs.value.filter((item) => isRecentFailed(item)).length);
+const canExportLogs = computed(() => authStore.hasAction('log.export'));
 const canReplayLogs = computed(() => authStore.hasAction('log.replay'));
 
 restoreFilters();
@@ -159,8 +160,16 @@ function goToDashboard() {
   void router.push({ name: 'dashboard' });
 }
 
+function hasMenu(name: 'tasks' | 'governance' | 'imports') {
+  return authStore.allowedMenus.includes(name as never);
+}
+
 function goToTasks(log?: TaskLogSummary | TaskLogDetail | null) {
   if (!log?.taskId) {
+    return;
+  }
+  if (!hasMenu('tasks')) {
+    ElMessage.warning('当前角色没有“任务调度”菜单权限');
     return;
   }
   void router.push({ name: 'tasks', query: { taskId: String(log.taskId), logId: String(log.logId) } });
@@ -171,10 +180,18 @@ function goToTarget(log?: TaskLogSummary | TaskLogDetail | null) {
     return;
   }
   if (log.taskType === 'GOVERNANCE') {
+    if (!hasMenu('governance')) {
+      ElMessage.warning('当前角色没有“数据治理”菜单权限');
+      return;
+    }
     void router.push({ name: 'governance', query: log.targetId ? { flowId: String(log.targetId) } : undefined });
     return;
   }
   if (log.taskType === 'IMPORT') {
+    if (!hasMenu('imports')) {
+      ElMessage.warning('当前角色没有“数据接入”菜单权限');
+      return;
+    }
     void router.push({ name: 'imports', query: log.targetId ? { importId: String(log.targetId) } : undefined });
   }
 }
@@ -371,6 +388,10 @@ function buildCsv(rows: TaskLogSummary[]) {
 }
 
 function exportLogs(format: 'csv' | 'json') {
+  if (!canExportLogs.value) {
+    ElMessage.warning('当前角色没有日志导出权限');
+    return;
+  }
   if (!filteredLogs.value.length) {
     ElMessage.warning('当前筛选结果为空，暂无可导出的日志');
     return;
@@ -445,12 +466,19 @@ onMounted(async () => {
       <el-card shadow="hover">
         <p class="stat-label">运行中</p>
         <p class="stat-value">{{ runningCount }}</p>
-        <el-button link type="primary" @click="goToTasks(selectedLog)">前往任务页</el-button>
+        <el-button v-if="hasMenu('tasks')" link type="primary" @click="goToTasks(selectedLog)">前往任务页</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">平均耗时</p>
         <p class="stat-value">{{ avgDuration }}s</p>
-        <el-button link type="primary" @click="goToTarget(selectedLog)">查看来源模块</el-button>
+        <el-button
+          v-if="(selectedLog?.taskType === 'GOVERNANCE' && hasMenu('governance')) || (selectedLog?.taskType === 'IMPORT' && hasMenu('imports'))"
+          link
+          type="primary"
+          @click="goToTarget(selectedLog)"
+        >
+          查看来源模块
+        </el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">近 7 天失败日志</p>
@@ -467,8 +495,8 @@ onMounted(async () => {
             <div class="card-header-actions">
               <span class="inline-tip">最近同步 {{ lastSyncedAt || '--:--:--' }}</span>
               <span class="inline-tip">已记忆筛选条件并同步到地址栏</span>
-              <el-button link type="primary" @click="exportLogs('csv')">导出 CSV</el-button>
-              <el-button link type="primary" @click="exportLogs('json')">导出 JSON</el-button>
+              <el-button link type="primary" :disabled="!canExportLogs" @click="exportLogs('csv')">导出 CSV</el-button>
+              <el-button link type="primary" :disabled="!canExportLogs" @click="exportLogs('json')">导出 JSON</el-button>
               <el-button link type="primary" @click="resetFilters">重置</el-button>
               <el-button link type="primary" @click="loadData">刷新</el-button>
               <el-button link type="primary" @click="goToDashboard">回首页</el-button>
@@ -537,6 +565,13 @@ onMounted(async () => {
           type="info"
           :closable="false"
         />
+        <el-alert
+          v-if="!canExportLogs"
+          class="notice-box"
+          title="当前角色只有日志查看权限，不能导出日志列表。"
+          type="warning"
+          :closable="false"
+        />
       </el-card>
     </section>
 
@@ -548,7 +583,7 @@ onMounted(async () => {
           <div class="card-header-actions">
             <el-tag type="success">实时列表</el-tag>
             <span class="inline-tip">当前筛选结果 {{ filteredLogs.length }} 条</span>
-            <el-button link type="primary" @click="goToTasks(selectedLog)">查看对应任务</el-button>
+            <el-button v-if="hasMenu('tasks')" link type="primary" @click="goToTasks(selectedLog)">查看对应任务</el-button>
           </div>
         </div>
       </template>
@@ -570,8 +605,14 @@ onMounted(async () => {
         <el-table-column prop="executionSummary" label="执行摘要" />
         <el-table-column label="跳转" width="170">
           <template #default="{ row }">
-            <el-button link type="primary" @click.stop="goToTasks(row)">任务页</el-button>
-            <el-button link @click.stop="goToTarget(row)">来源页</el-button>
+            <el-button v-if="hasMenu('tasks')" link type="primary" @click.stop="goToTasks(row)">任务页</el-button>
+            <el-button
+              v-if="(row.taskType === 'GOVERNANCE' && hasMenu('governance')) || (row.taskType === 'IMPORT' && hasMenu('imports'))"
+              link
+              @click.stop="goToTarget(row)"
+            >
+              来源页
+            </el-button>
             <el-button v-if="row.taskId && canReplayLogs" link type="danger" @click.stop="handleReplay(row)">回放</el-button>
           </template>
         </el-table-column>
@@ -580,15 +621,21 @@ onMounted(async () => {
 
     <el-card shadow="never">
       <template #header>
-        <div class="card-header">
-          <span>日志详情</span>
-          <div class="card-header-actions">
-            <el-tag :type="statusTagType(selectedLog?.status || '')">{{ selectedLog?.status || '未选择' }}</el-tag>
-            <el-button link type="primary" @click="goToTasks(selectedLog)">对应任务</el-button>
-            <el-button link @click="goToTarget(selectedLog)">来源页面</el-button>
+          <div class="card-header">
+            <span>日志详情</span>
+            <div class="card-header-actions">
+              <el-tag :type="statusTagType(selectedLog?.status || '')">{{ selectedLog?.status || '未选择' }}</el-tag>
+            <el-button v-if="hasMenu('tasks')" link type="primary" @click="goToTasks(selectedLog)">对应任务</el-button>
+            <el-button
+              v-if="(selectedLog?.taskType === 'GOVERNANCE' && hasMenu('governance')) || (selectedLog?.taskType === 'IMPORT' && hasMenu('imports'))"
+              link
+              @click="goToTarget(selectedLog)"
+            >
+              来源页面
+            </el-button>
+            </div>
           </div>
-        </div>
-      </template>
+        </template>
       <div v-if="selectedLog" class="page-grid">
         <el-descriptions :column="1" border>
           <el-descriptions-item label="任务名称">{{ selectedLog.taskName }}</el-descriptions-item>
@@ -618,8 +665,13 @@ onMounted(async () => {
           :closable="false"
         />
         <div class="detail-actions">
-          <el-button type="primary" @click="goToTasks(selectedLog)">去任务调度继续观察</el-button>
-          <el-button @click="goToTarget(selectedLog)">回到来源模块</el-button>
+          <el-button v-if="hasMenu('tasks')" type="primary" @click="goToTasks(selectedLog)">去任务调度继续观察</el-button>
+          <el-button
+            v-if="(selectedLog?.taskType === 'GOVERNANCE' && hasMenu('governance')) || (selectedLog?.taskType === 'IMPORT' && hasMenu('imports'))"
+            @click="goToTarget(selectedLog)"
+          >
+            回到来源模块
+          </el-button>
           <el-button v-if="selectedLog.taskId && canReplayLogs" type="danger" plain @click="handleReplay(selectedLog)">一键回放</el-button>
           <el-button link type="primary" @click="goToDashboard">返回首页总览</el-button>
         </div>

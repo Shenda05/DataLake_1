@@ -5,8 +5,12 @@ import * as echarts from 'echarts';
 import { useRouter } from 'vue-router';
 import { isAuthExpiredError } from '../api/client';
 import { getOverview, getRecentTasks, getTaskTrend, listTaskLogs, type TaskLogSummary } from '../api/platform';
+import { useAuthStore } from '../stores/auth';
+
+type MenuRoute = 'imports' | 'datasets' | 'governance' | 'tasks' | 'logs' | 'queries';
 
 const router = useRouter();
+const authStore = useAuthStore();
 const chartRef = ref<HTMLDivElement | null>(null);
 const overview = ref({
   dataSources: 0,
@@ -146,24 +150,63 @@ function formatEventAge(value?: string | null) {
   return `${minutes} 分钟前`;
 }
 
-function goTo(name: 'imports' | 'datasets' | 'governance' | 'tasks' | 'logs' | 'queries') {
+function menuLabel(name: MenuRoute) {
+  const labels: Record<MenuRoute, string> = {
+    imports: '数据接入',
+    datasets: '数据集管理',
+    governance: '数据治理',
+    tasks: '任务调度',
+    logs: '日志监控',
+    queries: '查询分析'
+  };
+  return labels[name];
+}
+
+function hasMenu(name: MenuRoute) {
+  return authStore.allowedMenus.includes(name as never);
+}
+
+function ensureMenu(name: MenuRoute) {
+  if (hasMenu(name)) {
+    return true;
+  }
+  ElMessage.warning(`当前角色没有“${menuLabel(name)}”菜单权限`);
+  return false;
+}
+
+function goTo(name: MenuRoute) {
+  if (!ensureMenu(name)) {
+    return;
+  }
   void router.push({ name });
 }
 
 function goToLog(logId: number) {
+  if (!ensureMenu('logs')) {
+    return;
+  }
   void router.push({ name: 'logs', query: { logId: String(logId) } });
 }
 
 function goToTask(taskId: number) {
+  if (!ensureMenu('tasks')) {
+    return;
+  }
   void router.push({ name: 'tasks', query: { taskId: String(taskId) } });
 }
 
 function goToTaskTarget(taskType: string, targetId?: number | null) {
   if (taskType === 'GOVERNANCE') {
+    if (!ensureMenu('governance')) {
+      return;
+    }
     void router.push({ name: 'governance', query: targetId ? { flowId: String(targetId) } : undefined });
     return;
   }
   if (taskType === 'IMPORT') {
+    if (!ensureMenu('imports')) {
+      return;
+    }
     void router.push({ name: 'imports', query: targetId ? { importId: String(targetId) } : undefined });
   }
 }
@@ -219,11 +262,11 @@ onBeforeUnmount(() => {
           <el-tag :type="latestStatus.type" size="large">{{ latestStatus.text }}</el-tag>
         </div>
         <div class="hero-actions">
-          <el-button type="primary" @click="goTo('imports')">开始数据接入</el-button>
-          <el-button @click="goTo('governance')">打开治理流程</el-button>
-          <el-button @click="goTo('tasks')">查看任务调度</el-button>
-          <el-button @click="goTo('logs')">查看执行日志</el-button>
-          <el-button link type="primary" @click="goTo('datasets')">查看全部数据集</el-button>
+          <el-button v-if="hasMenu('imports')" type="primary" @click="goTo('imports')">开始数据接入</el-button>
+          <el-button v-if="hasMenu('governance')" @click="goTo('governance')">打开治理流程</el-button>
+          <el-button v-if="hasMenu('tasks')" @click="goTo('tasks')">查看任务调度</el-button>
+          <el-button v-if="hasMenu('logs')" @click="goTo('logs')">查看执行日志</el-button>
+          <el-button v-if="hasMenu('datasets')" link type="primary" @click="goTo('datasets')">查看全部数据集</el-button>
         </div>
         <p class="hero-meta">最近同步 {{ lastSyncedAt || '--:--:--' }}，首页每 15 秒自动刷新一次。</p>
       </div>
@@ -233,37 +276,37 @@ onBeforeUnmount(() => {
       <el-card shadow="hover">
         <p class="stat-label">数据源总数</p>
         <p class="stat-value">{{ overview.dataSources }}</p>
-        <el-button link type="primary" @click="goTo('imports')">继续导入数据</el-button>
+        <el-button v-if="hasMenu('imports')" link type="primary" @click="goTo('imports')">继续导入数据</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">数据集总数</p>
         <p class="stat-value">{{ overview.datasets }}</p>
-        <el-button link type="primary" @click="goTo('datasets')">查看数据集</el-button>
+        <el-button v-if="hasMenu('datasets')" link type="primary" @click="goTo('datasets')">查看数据集</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">今日新增数据集</p>
         <p class="stat-value">{{ overview.newDatasetsToday }}</p>
-        <el-button link type="primary" @click="goTo('governance')">去生成新数据集</el-button>
+        <el-button v-if="hasMenu('governance')" link type="primary" @click="goTo('governance')">去生成新数据集</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">任务总数</p>
         <p class="stat-value">{{ overview.totalTasks }}</p>
-        <el-button link type="primary" @click="goTo('tasks')">进入任务页</el-button>
+        <el-button v-if="hasMenu('tasks')" link type="primary" @click="goTo('tasks')">进入任务页</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">运行中任务</p>
         <p class="stat-value">{{ overview.runningTasks }}</p>
-        <el-button link type="primary" @click="goTo('tasks')">观察实时状态</el-button>
+        <el-button v-if="hasMenu('tasks')" link type="primary" @click="goTo('tasks')">观察实时状态</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">成功率</p>
         <p class="stat-value">{{ successRate }}</p>
-        <el-button link type="primary" @click="goTo('logs')">查看成功明细</el-button>
+        <el-button v-if="hasMenu('logs')" link type="primary" @click="goTo('logs')">查看成功明细</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">成功 / 失败日志</p>
         <p class="stat-value">{{ overview.successTasks }} / {{ overview.failedTasks }}</p>
-        <el-button link type="primary" @click="goTo('logs')">打开日志中心</el-button>
+        <el-button v-if="hasMenu('logs')" link type="primary" @click="goTo('logs')">打开日志中心</el-button>
       </el-card>
     </section>
 
@@ -284,7 +327,7 @@ onBeforeUnmount(() => {
             <span>最近任务</span>
             <div class="card-header-actions">
               <el-tag type="success">Live</el-tag>
-              <el-button link type="primary" @click="goTo('tasks')">进入任务页</el-button>
+              <el-button v-if="hasMenu('tasks')" link type="primary" @click="goTo('tasks')">进入任务页</el-button>
             </div>
           </div>
         </template>
@@ -303,8 +346,14 @@ onBeforeUnmount(() => {
           <el-table-column prop="nextRunTime" label="下次执行" width="180" />
           <el-table-column label="跳转" width="160">
             <template #default="{ row }">
-              <el-button link type="primary" @click="goToTask(row.taskId)">任务页</el-button>
-              <el-button link @click="goToTaskTarget(row.taskType)">目标页</el-button>
+              <el-button v-if="hasMenu('tasks')" link type="primary" @click="goToTask(row.taskId)">任务页</el-button>
+              <el-button
+                v-if="(row.taskType === 'GOVERNANCE' && hasMenu('governance')) || (row.taskType === 'IMPORT' && hasMenu('imports'))"
+                link
+                @click="goToTaskTarget(row.taskType)"
+              >
+                目标页
+              </el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -318,7 +367,7 @@ onBeforeUnmount(() => {
             <span>最近执行日志</span>
             <div class="card-header-actions">
               <el-tag type="warning">Traceable</el-tag>
-              <el-button link type="primary" @click="goTo('logs')">打开日志页</el-button>
+              <el-button v-if="hasMenu('logs')" link type="primary" @click="goTo('logs')">打开日志页</el-button>
             </div>
           </div>
         </template>
@@ -334,8 +383,8 @@ onBeforeUnmount(() => {
           <el-table-column prop="executionSummary" label="结果摘要" />
           <el-table-column label="跳转" width="160">
             <template #default="{ row }">
-              <el-button link type="primary" @click="goToLog(row.logId)">详情</el-button>
-              <el-button v-if="row.taskId" link @click="goToTask(row.taskId)">任务</el-button>
+              <el-button v-if="hasMenu('logs')" link type="primary" @click="goToLog(row.logId)">详情</el-button>
+              <el-button v-if="row.taskId && hasMenu('tasks')" link @click="goToTask(row.taskId)">任务</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -371,7 +420,7 @@ onBeforeUnmount(() => {
             <span>最近 1 分钟任务事件流</span>
             <div class="card-header-actions">
               <el-tag type="danger">{{ recentEventStream.length }} 条</el-tag>
-              <el-button link type="primary" @click="goTo('logs')">跳转日志中心</el-button>
+              <el-button v-if="hasMenu('logs')" link type="primary" @click="goTo('logs')">跳转日志中心</el-button>
             </div>
           </div>
         </template>
@@ -388,8 +437,8 @@ onBeforeUnmount(() => {
               </p>
               <p class="event-summary">{{ log.executionSummary || log.errorMessage || '任务已开始执行' }}</p>
               <div class="card-header-actions">
-                <el-button link type="primary" @click="goToLog(log.logId)">日志详情</el-button>
-                <el-button v-if="log.taskId" link @click="goToTask(log.taskId)">查看任务</el-button>
+                <el-button v-if="hasMenu('logs')" link type="primary" @click="goToLog(log.logId)">日志详情</el-button>
+                <el-button v-if="log.taskId && hasMenu('tasks')" link @click="goToTask(log.taskId)">查看任务</el-button>
               </div>
             </div>
           </article>
@@ -408,11 +457,11 @@ onBeforeUnmount(() => {
           如果现场只想展示主价值，可以从这里直接跳到导入、治理、任务和日志，避免在侧边栏来回切页。
         </p>
         <div class="quick-links">
-          <el-button type="primary" @click="goTo('imports')">上传一份样例文件</el-button>
-          <el-button @click="goTo('queries')">查看查询分析</el-button>
-          <el-button @click="goTo('governance')">执行治理流程</el-button>
-          <el-button @click="goTo('tasks')">观察任务轮询</el-button>
-          <el-button @click="goTo('logs')">查看日志详情</el-button>
+          <el-button v-if="hasMenu('imports')" type="primary" @click="goTo('imports')">上传一份样例文件</el-button>
+          <el-button v-if="hasMenu('queries')" @click="goTo('queries')">查看查询分析</el-button>
+          <el-button v-if="hasMenu('governance')" @click="goTo('governance')">执行治理流程</el-button>
+          <el-button v-if="hasMenu('tasks')" @click="goTo('tasks')">观察任务轮询</el-button>
+          <el-button v-if="hasMenu('logs')" @click="goTo('logs')">查看日志详情</el-button>
         </div>
         <el-alert
           class="notice-box"

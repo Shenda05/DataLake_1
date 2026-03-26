@@ -76,6 +76,7 @@ const ACTION_OPTIONS: ActionOption[] = [
   { key: 'task.trigger', label: '任务触发' },
   { key: 'dataset.export', label: '数据集导出' },
   { key: 'query.export', label: '查询结果导出' },
+  { key: 'log.export', label: '日志导出' },
   { key: 'user.manage', label: '用户管理', adminOnly: true },
   { key: 'role.manage', label: '角色配置', adminOnly: true },
   { key: 'log.replay', label: '日志回放' }
@@ -91,8 +92,8 @@ const ACTION_GROUPS: PermissionGroup[] = [
   {
     key: 'export',
     label: '导出与回放',
-    description: '控制数据集导出、查询导出和失败日志回放。',
-    items: ['dataset.export', 'query.export', 'log.replay']
+    description: '控制数据集导出、查询导出、日志导出和失败日志回放。',
+    items: ['dataset.export', 'query.export', 'log.export', 'log.replay']
   },
   {
     key: 'admin',

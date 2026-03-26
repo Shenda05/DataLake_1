@@ -29,6 +29,7 @@ public final class RoleMenuCatalog {
         "task.trigger",
         "dataset.export",
         "query.export",
+        "log.export",
         "user.manage",
         "role.manage",
         "log.replay"
@@ -77,6 +78,7 @@ public final class RoleMenuCatalog {
             "task.trigger",
             "dataset.export",
             "query.export",
+            "log.export",
             "log.replay"
         );
     }
@@ -87,12 +89,26 @@ public final class RoleMenuCatalog {
                 "source.manage",
                 "import.database",
                 "dataset.delete",
+                "governance.manage",
+                "governance.execute",
+                "task.manage",
+                "task.trigger",
+                "dataset.export",
+                "query.export",
                 "user.manage",
                 "role.manage",
                 "log.replay"
             );
         }
-        return List.of("log.replay");
+        return List.of(
+            "governance.manage",
+            "governance.execute",
+            "task.manage",
+            "task.trigger",
+            "dataset.export",
+            "query.export",
+            "log.replay"
+        );
     }
 
     public static List<String> resolveStoredActions(String roleName, String serializedActions) {
