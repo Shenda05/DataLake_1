@@ -1,8 +1,10 @@
 package com.datalake.platform.bootstrap;
 
+import com.datalake.platform.auth.RoleMenuCatalog;
 import java.sql.Timestamp;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -20,18 +22,56 @@ public class DataBootstrapRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        ensureRoleMenuPermissionsColumn();
         bootstrapRoles();
         bootstrapUsers();
         bootstrapOperators();
     }
 
+    private void ensureRoleMenuPermissionsColumn() {
+        try {
+            jdbcTemplate.queryForList("select menu_permissions from sys_role where 1 = 0");
+        } catch (DataAccessException ex) {
+            jdbcTemplate.execute("alter table sys_role add column menu_permissions varchar(2000)");
+        }
+    }
+
     private void bootstrapRoles() {
         Integer count = jdbcTemplate.queryForObject("select count(*) from sys_role", Integer.class);
-        if (count != null && count > 0) {
+        if (count == null || count == 0) {
+            jdbcTemplate.update(
+                "insert into sys_role(role_name, role_desc, menu_permissions, create_time) values(?,?,?,?)",
+                "ADMIN",
+                "平台管理员",
+                RoleMenuCatalog.serializeConfiguredMenus("ADMIN", RoleMenuCatalog.defaultMenusForRole("ADMIN")),
+                now()
+            );
+            jdbcTemplate.update(
+                "insert into sys_role(role_name, role_desc, menu_permissions, create_time) values(?,?,?,?)",
+                "OPERATOR",
+                "数据操作员",
+                RoleMenuCatalog.serializeConfiguredMenus("OPERATOR", RoleMenuCatalog.defaultMenusForRole("OPERATOR")),
+                now()
+            );
             return;
         }
-        jdbcTemplate.update("insert into sys_role(role_name, role_desc, create_time) values(?,?,?)", "ADMIN", "平台管理员", now());
-        jdbcTemplate.update("insert into sys_role(role_name, role_desc, create_time) values(?,?,?)", "OPERATOR", "数据操作员", now());
+        backfillRoleMenuPermissions("ADMIN");
+        backfillRoleMenuPermissions("OPERATOR");
+    }
+
+    private void backfillRoleMenuPermissions(String roleName) {
+        RolePermissionState role = jdbcTemplate.query(
+            "select menu_permissions from sys_role where role_name = ?",
+            rs -> rs.next() ? new RolePermissionState(true, rs.getString("menu_permissions")) : new RolePermissionState(false, null),
+            roleName
+        );
+        if (role == null || !role.exists()) {
+            return;
+        }
+        String normalized = RoleMenuCatalog.serializeConfiguredMenus(roleName, RoleMenuCatalog.resolveStoredMenus(roleName, role.menuPermissions()));
+        if (!normalized.equals(role.menuPermissions())) {
+            jdbcTemplate.update("update sys_role set menu_permissions = ? where role_name = ?", normalized, roleName);
+        }
     }
 
     private void bootstrapUsers() {
@@ -87,5 +127,8 @@ public class DataBootstrapRunner implements ApplicationRunner {
 
     private Timestamp now() {
         return Timestamp.from(java.time.Instant.now());
+    }
+
+    private record RolePermissionState(boolean exists, String menuPermissions) {
     }
 }

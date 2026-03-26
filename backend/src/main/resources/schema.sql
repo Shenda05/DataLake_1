@@ -2,6 +2,7 @@ CREATE TABLE sys_role (
     role_id BIGINT PRIMARY KEY AUTO_INCREMENT,
     role_name VARCHAR(64) NOT NULL UNIQUE,
     role_desc VARCHAR(255),
+    menu_permissions VARCHAR(2000),
     create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

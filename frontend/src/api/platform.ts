@@ -171,6 +171,7 @@ export type RoleSummary = {
   roleId: number;
   roleName: string;
   roleDesc?: string | null;
+  menuPermissions: string[];
 };
 
 export type UserSummary = {
@@ -425,6 +426,10 @@ export function replayTaskLog(logId: number) {
 
 export function listRoles() {
   return apiGet<RoleSummary[]>('/roles');
+}
+
+export function updateRole(roleId: number, payload: { roleDesc?: string; menus: string[] }) {
+  return apiPut<RoleSummary>(`/roles/${roleId}`, payload);
 }
 
 export function listUsers() {

@@ -260,6 +260,38 @@ body {
   font-size: 14px;
 }
 
+.tag-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.permission-item {
+  margin-right: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.permission-hint {
+  margin-left: 8px;
+  color: var(--ink-1);
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  .permission-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .filter-range {
   width: 280px;
 }

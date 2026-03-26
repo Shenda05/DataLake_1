@@ -31,7 +31,7 @@ public class AuthService {
     public LoginResponse login(LoginRequest request) {
         UserAccount user = jdbcTemplate.query(
             """
-                select u.user_id,u.username,u.password,u.status,r.role_name
+                select u.user_id,u.username,u.password,u.status,r.role_name,r.role_desc,r.menu_permissions
                 from sys_user u
                 join sys_role r on r.role_id = u.role_id
                 where u.username = ?
@@ -43,7 +43,13 @@ public class AuthService {
             throw new BadCredentialsException("用户名或密码错误");
         }
         String token = jwtService.generateToken(user.userId(), user.username(), user.roleName());
-        return new LoginResponse(token, user.username(), user.roleName(), user.roleName().equals("ADMIN") ? "平台管理员" : "数据操作员", menus(user.roleName()));
+        return new LoginResponse(
+            token,
+            user.username(),
+            user.roleName(),
+            user.roleDesc() == null || user.roleDesc().isBlank() ? user.roleName() : user.roleDesc(),
+            RoleMenuCatalog.resolveStoredMenus(user.roleName(), user.menuPermissions())
+        );
     }
 
     public List<UserSummary> listUsers() {
@@ -69,9 +75,25 @@ public class AuthService {
 
     public List<RoleSummary> listRoles() {
         return jdbcTemplate.query(
-            "select role_id, role_name, role_desc from sys_role order by role_id",
-            (rs, rowNum) -> new RoleSummary(rs.getLong("role_id"), rs.getString("role_name"), rs.getString("role_desc"))
+            "select role_id, role_name, role_desc, menu_permissions from sys_role order by role_id",
+            (rs, rowNum) -> mapRoleSummary(rs)
         );
+    }
+
+    public RoleSummary updateRole(Long roleId, SaveRoleCommand command) {
+        RoleSummary existing = getRole(roleId);
+        String serializedMenus = RoleMenuCatalog.serializeConfiguredMenus(existing.roleName(), command.menuPermissions());
+        jdbcTemplate.update(
+            """
+                update sys_role
+                set role_desc = ?, menu_permissions = ?
+                where role_id = ?
+            """,
+            normalizeRoleDesc(command.roleDesc()),
+            serializedMenus,
+            roleId
+        );
+        return getRole(roleId);
     }
 
     public UserSummary createUser(SaveUserCommand command, Long operatorUserId) {
@@ -213,6 +235,18 @@ public class AuthService {
         return user;
     }
 
+    private RoleSummary getRole(Long roleId) {
+        RoleSummary role = jdbcTemplate.query(
+            "select role_id, role_name, role_desc, menu_permissions from sys_role where role_id = ?",
+            rs -> rs.next() ? mapRoleSummary(rs) : null,
+            roleId
+        );
+        if (role == null) {
+            throw new IllegalArgumentException("角色不存在: " + roleId);
+        }
+        return role;
+    }
+
     private Timestamp now() {
         return Timestamp.from(java.time.Instant.now());
     }
@@ -223,18 +257,26 @@ public class AuthService {
             rs.getString("username"),
             rs.getString("password"),
             rs.getString("status"),
-            rs.getString("role_name")
+            rs.getString("role_name"),
+            rs.getString("role_desc"),
+            rs.getString("menu_permissions")
         );
     }
 
-    private List<String> menus(String roleName) {
-        if ("ADMIN".equals(roleName)) {
-            return List.of("dashboard", "data-sources", "imports", "datasets", "queries", "governance", "tasks", "logs", "users");
-        }
-        return List.of("dashboard", "imports", "datasets", "queries", "governance", "tasks", "logs");
+    private RoleSummary mapRoleSummary(ResultSet rs) throws SQLException {
+        return new RoleSummary(
+            rs.getLong("role_id"),
+            rs.getString("role_name"),
+            rs.getString("role_desc"),
+            RoleMenuCatalog.resolveStoredMenus(rs.getString("role_name"), rs.getString("menu_permissions"))
+        );
     }
 
-    private record UserAccount(Long userId, String username, String password, String status, String roleName) {
+    private String normalizeRoleDesc(String roleDesc) {
+        return roleDesc == null || roleDesc.isBlank() ? null : roleDesc.trim();
+    }
+
+    private record UserAccount(Long userId, String username, String password, String status, String roleName, String roleDesc, String menuPermissions) {
     }
 
     public record UserSummary(
@@ -249,9 +291,12 @@ public class AuthService {
     ) {
     }
 
-    public record RoleSummary(Long roleId, String roleName, String roleDesc) {
+    public record RoleSummary(Long roleId, String roleName, String roleDesc, List<String> menuPermissions) {
     }
 
     public record SaveUserCommand(String username, String password, Long roleId, String status) {
+    }
+
+    public record SaveRoleCommand(String roleDesc, List<String> menuPermissions) {
     }
 }
