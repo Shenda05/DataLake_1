@@ -69,6 +69,36 @@ const form = reactive({
   description: '',
   status: 'ENABLED'
 });
+const ecommerceTaskTemplates = [
+  {
+    key: 'ORDER_IMPORT',
+    label: '每日订单导入任务',
+    taskType: 'IMPORT' as const,
+    cronExpr: '0 0 2 * * *',
+    description: '每天凌晨自动执行订单增量导入'
+  },
+  {
+    key: 'ORDER_GOVERNANCE',
+    label: '订单自动治理任务',
+    taskType: 'GOVERNANCE' as const,
+    cronExpr: '0 30 2 * * *',
+    description: '导入后自动执行订单去重与格式标准化'
+  },
+  {
+    key: 'PRODUCT_SALES',
+    label: '商品销量统计任务',
+    taskType: 'GOVERNANCE' as const,
+    cronExpr: '0 0 3 * * *',
+    description: '每日生成商品销量统计结果数据集'
+  },
+  {
+    key: 'INVENTORY_ALERT',
+    label: '库存预警统计任务',
+    taskType: 'GOVERNANCE' as const,
+    cronExpr: '0 30 3 * * *',
+    description: '每日统计低库存商品并输出预警结果'
+  }
+];
 
 const targetOptions = computed(() => {
   if (form.taskType === 'IMPORT') {
@@ -84,7 +114,9 @@ const targetOptions = computed(() => {
 });
 const hasTargetOptions = computed(() => targetOptions.value.length > 0);
 const targetEmptyTip = computed(() =>
-  form.taskType === 'IMPORT' ? '当前还没有可用的导入历史，请先到“数据接入”完成一次导入。' : '当前还没有可用的治理流程，请先到“数据治理”保存一个流程。'
+  form.taskType === 'IMPORT'
+    ? '当前还没有可用的导入历史，请先到“电商数据接入”完成一次导入。'
+    : '当前还没有可用的治理流程，请先到“电商数据治理”保存一个流程。'
 );
 const canManageTasks = computed(() => authStore.hasAction('task.manage'));
 const canTriggerTasks = computed(() => authStore.hasAction('task.trigger'));
@@ -203,6 +235,19 @@ function loadTask(task: TaskSummary, syncRoute = true) {
   if (syncRoute) {
     syncRouteState({ taskId: String(task.taskId) });
   }
+}
+
+function applyTaskTemplate(templateKey: string) {
+  const template = ecommerceTaskTemplates.find((item) => item.key === templateKey);
+  if (!template) {
+    return;
+  }
+  form.taskName = template.label;
+  form.taskType = template.taskType;
+  form.cronExpr = template.cronExpr;
+  form.description = template.description;
+  form.targetId = targetOptions.value[0]?.value;
+  ElMessage.success(`已套用模板：${template.label}`);
 }
 
 async function submit() {
@@ -701,7 +746,7 @@ onBeforeUnmount(() => {
       <el-card shadow="never">
       <template #header>
         <div class="card-header">
-          <span>{{ editingTaskId ? '编辑任务' : '新建任务' }}</span>
+          <span>{{ editingTaskId ? '编辑电商任务' : '新建电商任务' }}</span>
           <div>
             <el-button link type="primary" @click="resetForm">重置</el-button>
             <el-button type="primary" :loading="loading" :disabled="!canManageTasks" @click="submit">
@@ -710,9 +755,21 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
+      <div class="card-header-actions">
+        <span class="inline-tip">快捷模板：</span>
+        <el-button
+          v-for="template in ecommerceTaskTemplates"
+          :key="template.key"
+          size="small"
+          :disabled="!canManageTasks"
+          @click="applyTaskTemplate(template.key)"
+        >
+          {{ template.label }}
+        </el-button>
+      </div>
       <el-form label-position="top">
         <el-form-item label="任务名称">
-          <el-input v-model="form.taskName" placeholder="例如 每日治理流程执行" :disabled="!canManageTasks" />
+          <el-input v-model="form.taskName" placeholder="例如 每日订单导入任务" :disabled="!canManageTasks" />
         </el-form-item>
         <el-form-item label="任务类型">
           <el-select v-model="form.taskType" :disabled="!canManageTasks" @change="form.targetId = targetOptions[0]?.value">
@@ -748,7 +805,7 @@ onBeforeUnmount(() => {
       </el-form>
       <el-alert
         class="notice-box"
-        title="当前版本支持 IMPORT 和 GOVERNANCE 两类真实任务，调度器会按 nextRunTime 轮询执行"
+        title="本轮保留 IMPORT/GOVERNANCE 引擎，通过电商模板任务支持每日订单导入、自动治理、销量统计和库存预警"
         type="info"
         :closable="false"
       />

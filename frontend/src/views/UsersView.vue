@@ -34,14 +34,14 @@ type PermissionGroup = {
 };
 
 const MENU_OPTIONS: MenuOption[] = [
-  { key: 'dashboard', label: '首页' },
+  { key: 'dashboard', label: '电商仪表盘' },
   { key: 'data-sources', label: '数据源管理' },
-  { key: 'imports', label: '数据接入' },
-  { key: 'datasets', label: '数据集管理' },
-  { key: 'queries', label: '查询分析' },
-  { key: 'governance', label: '数据治理' },
-  { key: 'tasks', label: '任务调度' },
-  { key: 'logs', label: '日志监控' },
+  { key: 'imports', label: '电商数据接入' },
+  { key: 'datasets', label: '电商数据集' },
+  { key: 'queries', label: '电商查询分析' },
+  { key: 'governance', label: '电商数据治理' },
+  { key: 'tasks', label: '电商任务调度' },
+  { key: 'logs', label: '任务与日志' },
   { key: 'users', label: '用户与权限', adminOnly: true }
 ];
 

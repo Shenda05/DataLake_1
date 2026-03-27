@@ -33,55 +33,57 @@ public final class DemoDataFactory {
             "totalTasks", 26,
             "runningTasks", 2,
             "successTasks", 21,
-            "failedTasks", 3
+            "failedTasks", 3,
+            "recentFailedTasks", 2
         );
     }
 
     public static List<Map<String, Object>> taskTrend() {
         return List.of(
-            ordered("day", "03-12", "total", 3),
-            ordered("day", "03-13", "total", 4),
-            ordered("day", "03-14", "total", 2),
-            ordered("day", "03-15", "total", 6),
-            ordered("day", "03-16", "total", 5),
-            ordered("day", "03-17", "total", 4),
-            ordered("day", "03-18", "total", 7)
+            ordered("day", "03-21", "total", 3),
+            ordered("day", "03-22", "total", 4),
+            ordered("day", "03-23", "total", 5),
+            ordered("day", "03-24", "total", 4),
+            ordered("day", "03-25", "total", 6),
+            ordered("day", "03-26", "total", 5),
+            ordered("day", "03-27", "total", 7)
         );
     }
 
     public static List<Map<String, Object>> recentTasks() {
         return List.of(
-            ordered("taskId", 3001L, "taskName", "每日专利数据导入", "taskType", "IMPORT", "status", "SUCCESS", "nextRunTime", "2026-03-19 09:00"),
-            ordered("taskId", 3002L, "taskName", "企业画像治理流程", "taskType", "GOVERNANCE", "status", "RUNNING", "nextRunTime", "2026-03-19 10:00")
+            ordered("taskId", 3001L, "taskName", "每日订单导入任务", "taskType", "IMPORT", "status", "SUCCESS", "nextRunTime", "2026-03-28 02:00"),
+            ordered("taskId", 3002L, "taskName", "订单自动治理任务", "taskType", "GOVERNANCE", "status", "RUNNING", "nextRunTime", "2026-03-28 02:30")
         );
     }
 
     public static List<Map<String, Object>> dataSources() {
         return List.of(
-            ordered("sourceId", 1001L, "sourceName", "本地上传目录", "sourceType", "FILE", "status", "ENABLED", "description", "课程演示文件源"),
-            ordered("sourceId", 1002L, "sourceName", "业务 MySQL", "sourceType", "MYSQL", "status", "ENABLED", "description", "P1 数据库导入来源")
+            ordered("sourceId", 1001L, "sourceName", "电商文件上传目录", "sourceType", "FILE", "status", "ENABLED", "description", "订单/商品/库存演示文件源"),
+            ordered("sourceId", 1002L, "sourceName", "电商业务 MySQL", "sourceType", "MYSQL", "status", "ENABLED", "description", "订单库表导入来源")
         );
     }
 
     public static List<Map<String, Object>> importHistory() {
         return List.of(
-            ordered("importId", 5001L, "datasetName", "专利基础数据", "formatType", "CSV", "status", "SUCCESS", "recordCount", 1280, "operator", "admin"),
-            ordered("importId", 5002L, "datasetName", "企业画像数据", "formatType", "JSON", "status", "FAILED", "recordCount", 0, "operator", "operator")
+            ordered("importId", 5001L, "datasetName", "订单明细数据", "businessDomain", "TRADE", "formatType", "CSV", "status", "SUCCESS", "recordCount", 1280, "operator", "admin"),
+            ordered("importId", 5002L, "datasetName", "库存快照数据", "businessDomain", "INVENTORY", "formatType", "JSON", "status", "FAILED", "recordCount", 0, "operator", "operator")
         );
     }
 
     public static List<Map<String, Object>> datasets() {
         return List.of(
-            ordered("datasetId", 2001L, "datasetName", "专利基础数据", "sourceId", 1001L, "formatType", "CSV", "recordCount", 1280, "fieldCount", 12, "status", "READY", "creator", "admin"),
-            ordered("datasetId", 2002L, "datasetName", "企业画像数据", "sourceId", 1001L, "formatType", "JSON", "recordCount", 640, "fieldCount", 8, "status", "READY", "creator", "operator")
+            ordered("datasetId", 2001L, "datasetName", "订单明细数据", "businessDomain", "TRADE", "sourceId", 1001L, "formatType", "CSV", "recordCount", 1280, "fieldCount", 12, "status", "READY", "creator", "admin"),
+            ordered("datasetId", 2002L, "datasetName", "库存快照数据", "businessDomain", "INVENTORY", "sourceId", 1001L, "formatType", "JSON", "recordCount", 640, "fieldCount", 8, "status", "READY", "creator", "operator")
         );
     }
 
     public static Map<String, Object> datasetDetail(Long datasetId) {
         return ordered(
             "datasetId", datasetId,
-            "datasetName", datasetId == 2001L ? "专利基础数据" : "企业画像数据",
-            "sourceName", "本地上传目录",
+            "datasetName", datasetId == 2001L ? "订单明细数据" : "库存快照数据",
+            "businessDomain", datasetId == 2001L ? "TRADE" : "INVENTORY",
+            "sourceName", "电商文件上传目录",
             "formatType", datasetId == 2001L ? "CSV" : "JSON",
             "recordCount", datasetId == 2001L ? 1280 : 640,
             "fieldCount", datasetId == 2001L ? 12 : 8,
@@ -92,26 +94,41 @@ public final class DemoDataFactory {
     }
 
     public static List<Map<String, Object>> metadata(Long datasetId) {
+        if (datasetId == 2002L) {
+            return List.of(
+                ordered("fieldId", 1L, "datasetId", datasetId, "fieldName", "product_id", "fieldType", "STRING", "nullable", false, "sampleValue", "SKU-1001"),
+                ordered("fieldId", 2L, "datasetId", datasetId, "fieldName", "stock", "fieldType", "BIGINT", "nullable", false, "sampleValue", "12"),
+                ordered("fieldId", 3L, "datasetId", datasetId, "fieldName", "warehouse", "fieldType", "STRING", "nullable", true, "sampleValue", "华东仓")
+            );
+        }
         return List.of(
-            ordered("fieldId", 1L, "datasetId", datasetId, "fieldName", "patent_code", "fieldType", "STRING", "nullable", false, "sampleValue", "CN20250001"),
-            ordered("fieldId", 2L, "datasetId", datasetId, "fieldName", "company_name", "fieldType", "STRING", "nullable", false, "sampleValue", "示例科技"),
-            ordered("fieldId", 3L, "datasetId", datasetId, "fieldName", "industry", "fieldType", "STRING", "nullable", true, "sampleValue", "智能制造")
+            ordered("fieldId", 1L, "datasetId", datasetId, "fieldName", "order_id", "fieldType", "STRING", "nullable", false, "sampleValue", "ORD-20260327001"),
+            ordered("fieldId", 2L, "datasetId", datasetId, "fieldName", "product_id", "fieldType", "STRING", "nullable", false, "sampleValue", "SKU-1001"),
+            ordered("fieldId", 3L, "datasetId", datasetId, "fieldName", "amount", "fieldType", "DOUBLE", "nullable", true, "sampleValue", "129.9")
         );
     }
 
     public static PageResponse<Map<String, Object>> preview(Long datasetId) {
-        List<Map<String, Object>> rows = List.of(
-            ordered("rowNo", 1, "datasetId", datasetId, "patent_code", "CN20250001", "company_name", "示例科技", "industry", "智能制造"),
-            ordered("rowNo", 2, "datasetId", datasetId, "patent_code", "CN20250002", "company_name", "未来工业", "industry", "新能源")
-        );
+        List<Map<String, Object>> rows;
+        if (datasetId == 2002L) {
+            rows = List.of(
+                ordered("rowNo", 1, "datasetId", datasetId, "product_id", "SKU-1001", "stock", 12, "warehouse", "华东仓"),
+                ordered("rowNo", 2, "datasetId", datasetId, "product_id", "SKU-2001", "stock", 7, "warehouse", "华南仓")
+            );
+        } else {
+            rows = List.of(
+                ordered("rowNo", 1, "datasetId", datasetId, "order_id", "ORD-20260327001", "product_id", "SKU-1001", "amount", 129.9),
+                ordered("rowNo", 2, "datasetId", datasetId, "order_id", "ORD-20260327002", "product_id", "SKU-2001", "amount", 88.0)
+            );
+        }
         return new PageResponse<>(1, 10, rows.size(), rows);
     }
 
     public static List<Map<String, Object>> queryResult() {
         return List.of(
-            ordered("company_name", "示例科技", "industry", "智能制造", "patent_count", 22),
-            ordered("company_name", "未来工业", "industry", "新能源", "patent_count", 14),
-            ordered("company_name", "启明数据", "industry", "人工智能", "patent_count", 18)
+            ordered("product_id", "SKU-1001", "order_count", 22, "sales_amount", 3820.6),
+            ordered("product_id", "SKU-2001", "order_count", 14, "sales_amount", 2168.0),
+            ordered("product_id", "SKU-3001", "order_count", 18, "sales_amount", 2901.5)
         );
     }
 
@@ -128,9 +145,9 @@ public final class DemoDataFactory {
 
     public static List<Map<String, Object>> chartSeries(Long datasetId) {
         return List.of(
-            ordered("name", "智能制造", "value", 52),
-            ordered("name", "新能源", "value", 34),
-            ordered("name", "人工智能", "value", 26)
+            ordered("name", "数码", "value", 52),
+            ordered("name", "家居", "value", 34),
+            ordered("name", "食品", "value", 26)
         );
     }
 
@@ -139,14 +156,19 @@ public final class DemoDataFactory {
             ordered("operatorId", 1L, "operatorKey", "NULL_FILL", "operatorType", "CLEAN", "operatorName", "空值填充"),
             ordered("operatorId", 2L, "operatorKey", "DEDUPLICATE", "operatorType", "DEDUP", "operatorName", "重复数据清理"),
             ordered("operatorId", 3L, "operatorKey", "FIELD_CONVERT", "operatorType", "TRANSFORM", "operatorName", "字段转换"),
-            ordered("operatorId", 4L, "operatorKey", "FILTER_KEEP", "operatorType", "FILTER", "operatorName", "条件过滤")
+            ordered("operatorId", 4L, "operatorKey", "FILTER_KEEP", "operatorType", "FILTER", "operatorName", "条件过滤"),
+            ordered("operatorId", 5L, "operatorKey", "ORDER_DEDUP", "operatorType", "DEDUP", "operatorName", "订单去重"),
+            ordered("operatorId", 6L, "operatorKey", "AMOUNT_NORMALIZE", "operatorType", "TRANSFORM", "operatorName", "金额标准化"),
+            ordered("operatorId", 7L, "operatorKey", "TIME_NORMALIZE", "operatorType", "TRANSFORM", "operatorName", "时间标准化"),
+            ordered("operatorId", 8L, "operatorKey", "CATEGORY_NORMALIZE", "operatorType", "TRANSFORM", "operatorName", "商品分类标准化"),
+            ordered("operatorId", 9L, "operatorKey", "STATUS_NORMALIZE", "operatorType", "TRANSFORM", "operatorName", "状态标准化")
         );
     }
 
     public static List<Map<String, Object>> governanceFlows() {
         return List.of(
-            ordered("flowId", 7001L, "flowName", "企业画像清洗", "inputDatasetId", 2002L, "outputDatasetId", 2102L),
-            ordered("flowId", 7002L, "flowName", "专利数据标准化", "inputDatasetId", 2001L, "outputDatasetId", 2101L)
+            ordered("flowId", 7001L, "flowName", "订单自动治理流程", "inputDatasetId", 2001L, "outputDatasetId", 2101L),
+            ordered("flowId", 7002L, "flowName", "商品分类标准化流程", "inputDatasetId", 2002L, "outputDatasetId", 2102L)
         );
     }
 
@@ -156,8 +178,8 @@ public final class DemoDataFactory {
 
     public static List<Map<String, Object>> taskLogs() {
         return List.of(
-            ordered("logId", 4001L, "taskId", 3001L, "taskName", "每日专利数据导入", "status", "SUCCESS", "startTime", "2026-03-18 09:00", "endTime", "2026-03-18 09:03", "duration", 180, "message", "导入 1280 条，0 条失败"),
-            ordered("logId", 4002L, "taskId", 3002L, "taskName", "企业画像治理流程", "status", "FAILED", "startTime", "2026-03-18 14:00", "endTime", "2026-03-18 14:01", "duration", 60, "message", "字段 industry 为空值比例过高")
+            ordered("logId", 4001L, "taskId", 3001L, "taskName", "每日订单导入任务", "status", "SUCCESS", "startTime", "2026-03-27 02:00", "endTime", "2026-03-27 02:03", "duration", 180, "message", "导入 1280 条，0 条失败"),
+            ordered("logId", 4002L, "taskId", 3002L, "taskName", "订单自动治理任务", "status", "FAILED", "startTime", "2026-03-27 02:30", "endTime", "2026-03-27 02:31", "duration", 60, "message", "字段 order_time 时间格式不符合要求")
         );
     }
 
@@ -169,4 +191,3 @@ public final class DemoDataFactory {
         return map;
     }
 }
-

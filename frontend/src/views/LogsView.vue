@@ -82,6 +82,24 @@ const avgDuration = computed(() => {
   return Math.round(logs.value.reduce((sum, item) => sum + (item.duration || 0), 0) / logs.value.length);
 });
 const recentFailedCount = computed(() => logs.value.filter((item) => isRecentFailed(item)).length);
+// [已改造完成] 电商日志重点分类：导入、治理、调度、失败原因聚合。
+const importLogCount = computed(() => logs.value.filter((item) => item.taskType === 'IMPORT').length);
+const governanceLogCount = computed(() => logs.value.filter((item) => item.taskType === 'GOVERNANCE').length);
+const scheduledLogCount = computed(() => logs.value.filter((item) => item.taskId != null).length);
+const failureReasons = computed(() => {
+  const counter = new Map<string, number>();
+  for (const item of logs.value) {
+    if (item.status !== 'FAILED') {
+      continue;
+    }
+    const key = item.errorMessage || item.executionSummary || '未知失败原因';
+    counter.set(key, (counter.get(key) || 0) + 1);
+  }
+  return Array.from(counter.entries())
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 5)
+    .map(([reason, count]) => ({ reason, count }));
+});
 const canExportLogs = computed(() => authStore.hasAction('log.export'));
 const canReplayLogs = computed(() => authStore.hasAction('log.replay'));
 
@@ -169,10 +187,18 @@ function goToTasks(log?: TaskLogSummary | TaskLogDetail | null) {
     return;
   }
   if (!hasMenu('tasks')) {
-    ElMessage.warning('当前角色没有“任务调度”菜单权限');
+    ElMessage.warning('当前角色没有“电商任务调度”菜单权限');
     return;
   }
   void router.push({ name: 'tasks', query: { taskId: String(log.taskId), logId: String(log.logId) } });
+}
+
+function goToTaskCenter() {
+  if (!hasMenu('tasks')) {
+    ElMessage.warning('当前角色没有“电商任务调度”菜单权限');
+    return;
+  }
+  void router.push({ name: 'tasks' });
 }
 
 function goToTarget(log?: TaskLogSummary | TaskLogDetail | null) {
@@ -181,7 +207,7 @@ function goToTarget(log?: TaskLogSummary | TaskLogDetail | null) {
   }
   if (log.taskType === 'GOVERNANCE') {
     if (!hasMenu('governance')) {
-      ElMessage.warning('当前角色没有“数据治理”菜单权限');
+      ElMessage.warning('当前角色没有“电商数据治理”菜单权限');
       return;
     }
     void router.push({ name: 'governance', query: log.targetId ? { flowId: String(log.targetId) } : undefined });
@@ -189,7 +215,7 @@ function goToTarget(log?: TaskLogSummary | TaskLogDetail | null) {
   }
   if (log.taskType === 'IMPORT') {
     if (!hasMenu('imports')) {
-      ElMessage.warning('当前角色没有“数据接入”菜单权限');
+      ElMessage.warning('当前角色没有“电商数据接入”菜单权限');
       return;
     }
     void router.push({ name: 'imports', query: log.targetId ? { importId: String(log.targetId) } : undefined });
@@ -485,6 +511,21 @@ onMounted(async () => {
         <p class="stat-value">{{ recentFailedCount }}</p>
         <el-button link type="primary" @click="focusLatestFailed">定位最近失败</el-button>
       </el-card>
+      <el-card shadow="hover">
+        <p class="stat-label">导入任务日志</p>
+        <p class="stat-value">{{ importLogCount }}</p>
+        <el-button link type="primary" @click="filters.taskType = 'IMPORT'">只看导入日志</el-button>
+      </el-card>
+      <el-card shadow="hover">
+        <p class="stat-label">治理任务日志</p>
+        <p class="stat-value">{{ governanceLogCount }}</p>
+        <el-button link type="primary" @click="filters.taskType = 'GOVERNANCE'">只看治理日志</el-button>
+      </el-card>
+      <el-card shadow="hover">
+        <p class="stat-label">调度执行日志</p>
+        <p class="stat-value">{{ scheduledLogCount }}</p>
+        <el-button v-if="hasMenu('tasks')" link type="primary" @click="goToTaskCenter">定位任务调度</el-button>
+      </el-card>
     </section>
 
     <section class="two-column-grid">
@@ -572,6 +613,30 @@ onMounted(async () => {
           type="warning"
           :closable="false"
         />
+      </el-card>
+      <el-card shadow="never">
+        <template #header>
+          <div class="card-header">
+            <span>失败原因 Top5</span>
+            <el-tag type="danger">{{ failureReasons.length }} 项</el-tag>
+          </div>
+        </template>
+        <el-alert
+          class="notice-box"
+          title="按失败原因聚合，便于优先排查高频问题。"
+          type="error"
+          :closable="false"
+        />
+        <el-table :data="failureReasons" stripe>
+          <el-table-column label="排名" width="80">
+            <template #default="{ $index }">
+              {{ $index + 1 }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="reason" label="失败原因" />
+          <el-table-column prop="count" label="次数" width="100" />
+        </el-table>
+        <el-empty v-if="failureReasons.length === 0" description="当前暂无失败日志" />
       </el-card>
     </section>
 

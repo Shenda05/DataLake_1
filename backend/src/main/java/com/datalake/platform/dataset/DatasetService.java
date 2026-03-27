@@ -1,5 +1,6 @@
 package com.datalake.platform.dataset;
 
+import com.datalake.platform.common.domain.BusinessDomainCatalog;
 import com.datalake.platform.common.util.GeneratedKeyUtils;
 import com.datalake.platform.common.util.SqlNameUtils;
 import com.datalake.platform.common.web.PageResponse;
@@ -31,6 +32,7 @@ public class DatasetService {
     public CreatedDataset createImportedDataset(
         Long sourceId,
         String datasetName,
+        String businessDomain,
         String formatType,
         String storagePath,
         String description,
@@ -50,12 +52,13 @@ public class DatasetService {
                 column.fieldOrder()
             ))
             .toList();
-        return createDatasetFromRows(sourceId, datasetName, formatType, storagePath, description, creator, columns, rows);
+        return createDatasetFromRows(sourceId, datasetName, businessDomain, formatType, storagePath, description, creator, columns, rows);
     }
 
     public CreatedDataset createDatasetFromRows(
         Long sourceId,
         String datasetName,
+        String businessDomain,
         String formatType,
         String storagePath,
         String description,
@@ -63,27 +66,29 @@ public class DatasetService {
         List<MetaFieldRecord> columns,
         List<Map<String, Object>> rows
     ) {
+        String normalizedDomain = BusinessDomainCatalog.normalize(businessDomain);
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
                 """
-                    insert into data_set(dataset_name,source_id,format_type,record_count,field_count,storage_path,physical_table_name,description,creator,status,create_time,update_time)
-                    values(?,?,?,?,?,?,?,?,?,?,?,?)
+                    insert into data_set(dataset_name,business_domain,source_id,format_type,record_count,field_count,storage_path,physical_table_name,description,creator,status,create_time,update_time)
+                    values(?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 Statement.RETURN_GENERATED_KEYS
             );
             statement.setString(1, datasetName);
-            statement.setObject(2, sourceId);
-            statement.setString(3, formatType);
-            statement.setLong(4, rows.size());
-            statement.setInt(5, columns.size());
-            statement.setString(6, storagePath);
-            statement.setString(7, "pending_table_name");
-            statement.setString(8, description);
-            statement.setLong(9, creator);
-            statement.setString(10, "READY");
-            statement.setTimestamp(11, now());
+            statement.setString(2, normalizedDomain);
+            statement.setObject(3, sourceId);
+            statement.setString(4, formatType);
+            statement.setLong(5, rows.size());
+            statement.setInt(6, columns.size());
+            statement.setString(7, storagePath);
+            statement.setString(8, "pending_table_name");
+            statement.setString(9, description);
+            statement.setLong(10, creator);
+            statement.setString(11, "READY");
             statement.setTimestamp(12, now());
+            statement.setTimestamp(13, now());
             return statement;
         }, keyHolder);
         Long datasetId = GeneratedKeyUtils.getLongId(keyHolder, "dataset_id");
@@ -92,13 +97,13 @@ public class DatasetService {
         List<MetaFieldRecord> persistedColumns = insertMetaFields(datasetId, columns);
         datasetTableService.createPhysicalTable(physicalTableName, persistedColumns);
         datasetTableService.insertRows(physicalTableName, persistedColumns, rows);
-        return new CreatedDataset(datasetId, datasetName, physicalTableName, rows.size(), persistedColumns.size());
+        return new CreatedDataset(datasetId, datasetName, normalizedDomain, physicalTableName, rows.size(), persistedColumns.size());
     }
 
     public List<DatasetSummary> list() {
         return jdbcTemplate.query(
             """
-                select dataset_id,source_id,dataset_name,format_type,record_count,field_count,status,creator,physical_table_name
+                select dataset_id,source_id,dataset_name,business_domain,format_type,record_count,field_count,status,creator,physical_table_name
                 from data_set
                 order by dataset_id desc
             """,
@@ -106,6 +111,7 @@ public class DatasetService {
                 rs.getLong("dataset_id"),
                 (Long) rs.getObject("source_id"),
                 rs.getString("dataset_name"),
+                rs.getString("business_domain"),
                 rs.getString("format_type"),
                 rs.getLong("record_count"),
                 rs.getInt("field_count"),
@@ -119,7 +125,7 @@ public class DatasetService {
     public DatasetDetail detail(Long datasetId) {
         DatasetDetail detail = jdbcTemplate.query(
             """
-                select dataset_id,dataset_name,source_id,format_type,record_count,field_count,status,creator,storage_path,physical_table_name,description,create_time,update_time
+                select dataset_id,dataset_name,business_domain,source_id,format_type,record_count,field_count,status,creator,storage_path,physical_table_name,description,create_time,update_time
                 from data_set
                 where dataset_id = ?
             """,
@@ -127,6 +133,7 @@ public class DatasetService {
                 ? new DatasetDetail(
                     rs.getLong("dataset_id"),
                     rs.getString("dataset_name"),
+                    rs.getString("business_domain"),
                     (Long) rs.getObject("source_id"),
                     rs.getString("format_type"),
                     rs.getLong("record_count"),
@@ -267,13 +274,21 @@ public class DatasetService {
         return Timestamp.from(java.time.Instant.now());
     }
 
-    public record CreatedDataset(Long datasetId, String datasetName, String physicalTableName, int recordCount, int fieldCount) {
+    public record CreatedDataset(
+        Long datasetId,
+        String datasetName,
+        String businessDomain,
+        String physicalTableName,
+        int recordCount,
+        int fieldCount
+    ) {
     }
 
     public record DatasetSummary(
         Long datasetId,
         Long sourceId,
         String datasetName,
+        String businessDomain,
         String formatType,
         Long recordCount,
         Integer fieldCount,
@@ -286,6 +301,7 @@ public class DatasetService {
     public record DatasetDetail(
         Long datasetId,
         String datasetName,
+        String businessDomain,
         Long sourceId,
         String formatType,
         Long recordCount,

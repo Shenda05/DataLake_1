@@ -24,6 +24,8 @@ public class DataBootstrapRunner implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         ensureRoleMenuPermissionsColumn();
         ensureRoleActionPermissionsColumn();
+        ensureDatasetBusinessDomainColumn();
+        ensureImportBusinessDomainColumn();
         bootstrapRoles();
         bootstrapUsers();
         bootstrapOperators();
@@ -43,6 +45,24 @@ public class DataBootstrapRunner implements ApplicationRunner {
         } catch (DataAccessException ex) {
             jdbcTemplate.execute("alter table sys_role add column action_permissions varchar(2000)");
         }
+    }
+
+    private void ensureDatasetBusinessDomainColumn() {
+        try {
+            jdbcTemplate.queryForList("select business_domain from data_set where 1 = 0");
+        } catch (DataAccessException ex) {
+            jdbcTemplate.execute("alter table data_set add column business_domain varchar(32) default 'TRADE'");
+        }
+        jdbcTemplate.update("update data_set set business_domain = 'TRADE' where business_domain is null or trim(business_domain) = ''");
+    }
+
+    private void ensureImportBusinessDomainColumn() {
+        try {
+            jdbcTemplate.queryForList("select business_domain from import_record where 1 = 0");
+        } catch (DataAccessException ex) {
+            jdbcTemplate.execute("alter table import_record add column business_domain varchar(32) default 'TRADE'");
+        }
+        jdbcTemplate.update("update import_record set business_domain = 'TRADE' where business_domain is null or trim(business_domain) = ''");
     }
 
     private void bootstrapRoles() {
@@ -125,17 +145,32 @@ public class DataBootstrapRunner implements ApplicationRunner {
     }
 
     private void bootstrapOperators() {
-        Integer count = jdbcTemplate.queryForObject("select count(*) from operator_def", Integer.class);
-        if (count != null && count > 0) {
-            return;
-        }
-        insertOperator("空值填充", "NULL_FILL", "CLEAN", "{\"field\":\"string\",\"fillValue\":\"string\"}", "将空值替换为指定内容");
-        insertOperator("重复数据清理", "DEDUPLICATE", "DEDUP", "{\"fields\":[\"string\"]}", "按指定字段去重");
-        insertOperator("字段转换", "FIELD_CONVERT", "TRANSFORM", "{\"field\":\"string\",\"transform\":\"TRIM|UPPER|LOWER|NUMBER\"}", "执行字段清洗与格式转换");
-        insertOperator("条件过滤", "FILTER_KEEP", "FILTER", "{\"field\":\"string\",\"operator\":\"LIKE|EQ|GT|LT\",\"value\":\"string\"}", "仅保留符合条件的记录");
+        // [Ecom-MVP Completed] 保留通用算子，同时补齐电商治理算子
+        ensureOperator("空值填充", "NULL_FILL", "CLEAN", "{\"field\":\"string\",\"fillValue\":\"string\"}", "将空值替换为指定内容");
+        ensureOperator("重复数据清理", "DEDUPLICATE", "DEDUP", "{\"fields\":[\"string\"]}", "按指定字段去重");
+        ensureOperator("字段转换", "FIELD_CONVERT", "TRANSFORM", "{\"field\":\"string\",\"transform\":\"TRIM|UPPER|LOWER|NUMBER\"}", "执行字段清洗与格式转换");
+        ensureOperator("条件过滤", "FILTER_KEEP", "FILTER", "{\"field\":\"string\",\"operator\":\"LIKE|EQ|GT|LT\",\"value\":\"string\"}", "仅保留符合条件的记录");
+        ensureOperator("订单去重", "ORDER_DEDUP", "DEDUP", "{\"field\":\"order_id\"}", "按订单主键去重");
+        ensureOperator("金额标准化", "AMOUNT_NORMALIZE", "TRANSFORM", "{\"field\":\"amount\"}", "统一金额格式为两位小数");
+        ensureOperator("时间标准化", "TIME_NORMALIZE", "TRANSFORM", "{\"field\":\"order_time\"}", "统一时间格式为 ISO 时间");
+        ensureOperator("商品分类标准化", "CATEGORY_NORMALIZE", "TRANSFORM", "{\"field\":\"category\"}", "规范商品分类值");
+        ensureOperator("状态标准化", "STATUS_NORMALIZE", "TRANSFORM", "{\"field\":\"status\"}", "规范订单或支付状态值");
     }
 
-    private void insertOperator(String operatorName, String operatorKey, String operatorType, String configSchema, String description) {
+    private void ensureOperator(String operatorName, String operatorKey, String operatorType, String configSchema, String description) {
+        Integer count = jdbcTemplate.queryForObject("select count(*) from operator_def where operator_key = ?", Integer.class, operatorKey);
+        if (count != null && count > 0) {
+            jdbcTemplate.update(
+                "update operator_def set operator_name = ?, operator_type = ?, config_schema = ?, description = ?, status = ? where operator_key = ?",
+                operatorName,
+                operatorType,
+                configSchema,
+                description,
+                "ENABLED",
+                operatorKey
+            );
+            return;
+        }
         jdbcTemplate.update(
             "insert into operator_def(operator_name,operator_key,operator_type,config_schema,description,status,create_time) values(?,?,?,?,?,?,?)",
             operatorName,

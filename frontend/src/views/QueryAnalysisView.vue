@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import * as echarts from 'echarts';
 import { isAuthExpiredError } from '../api/client';
@@ -11,16 +11,23 @@ import {
   getAnalysisSummary,
   listDatasets,
   listMetadata,
+  queryEcommerceMetric,
+  queryIntegration,
   sqlQuery,
   type DatasetSummary,
+  type IntegrationResponse,
   type MetaField
 } from '../api/platform';
 import { useAuthStore } from '../stores/auth';
 
 const chartRef = ref<HTMLDivElement | null>(null);
+const metricChartRef = ref<HTMLDivElement | null>(null);
 const authStore = useAuthStore();
+const activeTab = ref<'base' | 'metric' | 'integration'>('base');
 const datasets = ref<DatasetSummary[]>([]);
 const metadata = ref<MetaField[]>([]);
+const leftMetadata = ref<MetaField[]>([]);
+const rightMetadata = ref<MetaField[]>([]);
 const summary = ref({
   datasetId: 0,
   recordCount: 0,
@@ -29,7 +36,13 @@ const summary = ref({
 });
 const tableData = ref<Record<string, unknown>[]>([]);
 const chartData = ref<{ name: string; value: number }[]>([]);
+const metricData = ref<{ name: string; value: number }[]>([]);
+const metricTable = ref<Record<string, unknown>[]>([]);
+const metricDescription = ref('');
+const integrationResult = ref<IntegrationResponse | null>(null);
 const resultColumns = computed(() => Object.keys(tableData.value[0] || {}));
+const metricColumns = computed(() => Object.keys(metricTable.value[0] || {}));
+const integrationColumns = computed(() => integrationResult.value?.columns || []);
 const canExportQuery = computed(() => authStore.hasAction('query.export'));
 const lastQueryMode = ref<'FILTER' | 'SQL'>('FILTER');
 const form = reactive({
@@ -39,7 +52,27 @@ const form = reactive({
   value: '',
   sql: 'SELECT * FROM dataset LIMIT 20'
 });
+const metricForm = reactive({
+  datasetId: undefined as number | undefined,
+  metricType: 'ORDER_TREND' as 'ORDER_TREND' | 'SALES_TREND' | 'TOP_PRODUCTS' | 'CATEGORY_SHARE' | 'LOW_STOCK',
+  timeField: '',
+  valueField: '',
+  categoryField: '',
+  productField: '',
+  quantityField: '',
+  stockThreshold: 10
+});
+const integrationForm = reactive({
+  leftDatasetId: undefined as number | undefined,
+  rightDatasetId: undefined as number | undefined,
+  mode: 'JOIN' as 'JOIN' | 'UNION',
+  leftField: '',
+  rightField: '',
+  limit: 200
+});
+// [旧通用版共用] 条件查询与 SQL 查询能力保留，仅在同页增加电商指标与集成子标签。
 let chart: echarts.ECharts | null = null;
+let metricChart: echarts.ECharts | null = null;
 
 async function renderChart() {
   await nextTick();
@@ -61,12 +94,58 @@ async function renderChart() {
   });
 }
 
+async function renderMetricChart() {
+  await nextTick();
+  if (!metricChartRef.value) return;
+  if (!metricChart) {
+    metricChart = echarts.init(metricChartRef.value);
+  }
+  if (metricForm.metricType === 'CATEGORY_SHARE') {
+    metricChart.setOption({
+      tooltip: { trigger: 'item' },
+      legend: { bottom: 0 },
+      series: [
+        {
+          type: 'pie',
+          radius: ['42%', '72%'],
+          data: metricData.value.map((item) => ({ name: item.name, value: item.value })),
+          itemStyle: { borderRadius: 6 }
+        }
+      ]
+    }, { notMerge: true });
+    return;
+  }
+  metricChart.setOption({
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: metricData.value.map((item) => item.name) },
+    yAxis: { type: 'value' },
+    series: [
+      {
+        type: metricForm.metricType === 'TOP_PRODUCTS' || metricForm.metricType === 'LOW_STOCK' ? 'bar' : 'line',
+        smooth: metricForm.metricType === 'ORDER_TREND' || metricForm.metricType === 'SALES_TREND',
+        data: metricData.value.map((item) => item.value),
+        itemStyle: { color: '#1f8f6b' }
+      }
+    ]
+  }, { notMerge: true });
+}
+
 async function loadBaseData() {
   datasets.value = await listDatasets();
   if (datasets.value.length > 0 && !form.datasetId) {
     form.datasetId = datasets.value[0].datasetId;
   }
-  await loadDatasetAnalysis();
+  if (datasets.value.length > 0 && !metricForm.datasetId) {
+    metricForm.datasetId = datasets.value[0].datasetId;
+  }
+  if (datasets.value.length > 1) {
+    integrationForm.leftDatasetId = integrationForm.leftDatasetId || datasets.value[0].datasetId;
+    integrationForm.rightDatasetId = integrationForm.rightDatasetId || datasets.value[1].datasetId;
+  } else if (datasets.value.length === 1) {
+    integrationForm.leftDatasetId = datasets.value[0].datasetId;
+    integrationForm.rightDatasetId = datasets.value[0].datasetId;
+  }
+  await Promise.all([loadDatasetAnalysis(), loadIntegrationMetadata()]);
 }
 
 async function loadDatasetAnalysis() {
@@ -153,6 +232,95 @@ async function exportRows(format: 'csv' | 'json' | 'xlsx') {
   }
 }
 
+async function runMetricQuery() {
+  if (!metricForm.datasetId) {
+    ElMessage.warning('请选择数据集');
+    return;
+  }
+  try {
+    const result = await queryEcommerceMetric({
+      datasetId: metricForm.datasetId,
+      metricType: metricForm.metricType,
+      timeField: metricForm.timeField || undefined,
+      valueField: metricForm.valueField || undefined,
+      categoryField: metricForm.categoryField || undefined,
+      productField: metricForm.productField || undefined,
+      quantityField: metricForm.quantityField || undefined,
+      stockThreshold: metricForm.stockThreshold
+    });
+    metricData.value = result.chart;
+    metricTable.value = result.table;
+    metricDescription.value = result.description;
+    await renderMetricChart();
+  } catch (error) {
+    ElMessage.error(`电商指标查询失败: ${(error as Error).message}`);
+  }
+}
+
+async function loadIntegrationMetadata() {
+  if (integrationForm.leftDatasetId) {
+    leftMetadata.value = await listMetadata(integrationForm.leftDatasetId);
+    if (!integrationForm.leftField && leftMetadata.value.length > 0) {
+      integrationForm.leftField = leftMetadata.value[0].fieldName;
+    }
+  }
+  if (integrationForm.rightDatasetId) {
+    rightMetadata.value = await listMetadata(integrationForm.rightDatasetId);
+    if (!integrationForm.rightField && rightMetadata.value.length > 0) {
+      integrationForm.rightField = rightMetadata.value[0].fieldName;
+    }
+  }
+}
+
+async function runIntegration() {
+  if (!integrationForm.leftDatasetId || !integrationForm.rightDatasetId) {
+    ElMessage.warning('请先选择左右数据集');
+    return;
+  }
+  if (integrationForm.mode === 'JOIN' && (!integrationForm.leftField || !integrationForm.rightField)) {
+    ElMessage.warning('JOIN 模式需要选择左右关联字段');
+    return;
+  }
+  try {
+    integrationResult.value = await queryIntegration({
+      leftDatasetId: integrationForm.leftDatasetId,
+      rightDatasetId: integrationForm.rightDatasetId,
+      mode: integrationForm.mode,
+      leftField: integrationForm.leftField || undefined,
+      rightField: integrationForm.rightField || undefined,
+      limit: integrationForm.limit
+    });
+  } catch (error) {
+    ElMessage.error(`数据集成失败: ${(error as Error).message}`);
+  }
+}
+
+watch(
+  () => form.datasetId,
+  () => {
+    void loadDatasetAnalysis();
+  }
+);
+
+watch(
+  () => [integrationForm.leftDatasetId, integrationForm.rightDatasetId],
+  () => {
+    void loadIntegrationMetadata();
+  }
+);
+
+watch(
+  () => activeTab.value,
+  (tab) => {
+    if (tab === 'metric') {
+      void renderMetricChart();
+    }
+    if (tab === 'base') {
+      void renderChart();
+    }
+  }
+);
+
 onMounted(async () => {
   try {
     await loadBaseData();
@@ -164,7 +332,10 @@ onMounted(async () => {
   }
 });
 
-onBeforeUnmount(() => chart?.dispose());
+onBeforeUnmount(() => {
+  chart?.dispose();
+  metricChart?.dispose();
+});
 </script>
 
 <template>
@@ -172,109 +343,264 @@ onBeforeUnmount(() => chart?.dispose());
     <el-card shadow="never">
       <template #header>
         <div class="card-header">
-          <span>条件查询与 SQL 查询</span>
+          <span>电商查询分析</span>
           <el-tag type="success">Real Query</el-tag>
         </div>
       </template>
-      <el-form inline>
-        <el-form-item label="数据集">
-          <el-select v-model="form.datasetId" placeholder="请选择数据集" @change="loadDatasetAnalysis">
-            <el-option
-              v-for="dataset in datasets"
-              :key="dataset.datasetId"
-              :label="dataset.datasetName"
-              :value="dataset.datasetId"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="字段">
-          <el-select v-model="form.field" placeholder="请选择字段">
-            <el-option
-              v-for="column in metadata"
-              :key="column.fieldId"
-              :label="column.fieldName"
-              :value="column.fieldName"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="操作符">
-          <el-select v-model="form.operator">
-            <el-option label="LIKE" value="LIKE" />
-            <el-option label="EQ" value="EQ" />
-            <el-option label="GT" value="GT" />
-            <el-option label="LT" value="LT" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="条件值">
-          <el-input v-model="form.value" placeholder="例如 智能制造" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="runFilterQuery">执行条件查询</el-button>
-        </el-form-item>
-      </el-form>
-      <el-input
-        v-model="form.sql"
-        type="textarea"
-        :rows="4"
-        placeholder="SELECT * FROM dataset LIMIT 20"
-      />
-      <div class="action-row">
-        <el-button type="primary" plain @click="runSqlQuery">执行 SQL 查询</el-button>
-      </div>
-      <el-alert
-        v-if="!canExportQuery"
-        class="notice-box"
-        title="当前角色只有查询查看权限，不能导出查询结果。"
-        type="info"
-        :closable="false"
-      />
-    </el-card>
-
-    <section class="stat-grid">
-      <el-card shadow="hover">
-        <p class="stat-label">记录数</p>
-        <p class="stat-value">{{ summary.recordCount }}</p>
-      </el-card>
-      <el-card shadow="hover">
-        <p class="stat-label">空值数</p>
-        <p class="stat-value">{{ summary.nullCount }}</p>
-      </el-card>
-      <el-card shadow="hover">
-        <p class="stat-label">重复行数</p>
-        <p class="stat-value">{{ summary.duplicateCount }}</p>
-      </el-card>
-    </section>
-
-    <section class="two-column-grid">
-      <el-card shadow="never">
-        <template #header>
-          <div class="card-header">
-            <span>查询结果</span>
-            <div>
-              <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('csv')">导出 CSV</el-button>
-              <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('json')">导出 JSON</el-button>
-              <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('xlsx')">导出 Excel</el-button>
-            </div>
-          </div>
-        </template>
-        <el-table :data="tableData" stripe>
-          <el-table-column
-            v-for="column in resultColumns"
-            :key="column"
-            :prop="column"
-            :label="column"
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="条件/SQL 查询" name="base">
+          <el-form inline>
+            <el-form-item label="数据集">
+              <el-select v-model="form.datasetId" placeholder="请选择数据集">
+                <el-option
+                  v-for="dataset in datasets"
+                  :key="dataset.datasetId"
+                  :label="`${dataset.datasetName} (${dataset.businessDomain})`"
+                  :value="dataset.datasetId"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="字段">
+              <el-select v-model="form.field" placeholder="请选择字段">
+                <el-option
+                  v-for="column in metadata"
+                  :key="column.fieldId"
+                  :label="column.fieldName"
+                  :value="column.fieldName"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="操作符">
+              <el-select v-model="form.operator">
+                <el-option label="LIKE" value="LIKE" />
+                <el-option label="EQ" value="EQ" />
+                <el-option label="GT" value="GT" />
+                <el-option label="LT" value="LT" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="条件值">
+              <el-input v-model="form.value" placeholder="例如 已支付" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="runFilterQuery">执行条件查询</el-button>
+            </el-form-item>
+          </el-form>
+          <el-input
+            v-model="form.sql"
+            type="textarea"
+            :rows="4"
+            placeholder="SELECT * FROM dataset LIMIT 20"
           />
-        </el-table>
-      </el-card>
-      <el-card shadow="never">
-        <template #header>
-          <div class="card-header">
-            <span>图表可视化</span>
-            <el-tag>ECharts</el-tag>
+          <div class="action-row">
+            <el-button type="primary" plain @click="runSqlQuery">执行 SQL 查询</el-button>
           </div>
-        </template>
-        <div ref="chartRef" class="chart-box"></div>
-      </el-card>
-    </section>
+          <el-alert
+            v-if="!canExportQuery"
+            class="notice-box"
+            title="当前角色只有查询查看权限，不能导出查询结果。"
+            type="info"
+            :closable="false"
+          />
+
+          <section class="stat-grid notice-box">
+            <el-card shadow="hover">
+              <p class="stat-label">记录数</p>
+              <p class="stat-value">{{ summary.recordCount }}</p>
+            </el-card>
+            <el-card shadow="hover">
+              <p class="stat-label">空值数</p>
+              <p class="stat-value">{{ summary.nullCount }}</p>
+            </el-card>
+            <el-card shadow="hover">
+              <p class="stat-label">重复行数</p>
+              <p class="stat-value">{{ summary.duplicateCount }}</p>
+            </el-card>
+          </section>
+
+          <section class="two-column-grid notice-box">
+            <el-card shadow="never">
+              <template #header>
+                <div class="card-header">
+                  <span>查询结果</span>
+                  <div>
+                    <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('csv')">导出 CSV</el-button>
+                    <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('json')">导出 JSON</el-button>
+                    <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('xlsx')">导出 Excel</el-button>
+                  </div>
+                </div>
+              </template>
+              <el-table :data="tableData" stripe>
+                <el-table-column
+                  v-for="column in resultColumns"
+                  :key="column"
+                  :prop="column"
+                  :label="column"
+                />
+              </el-table>
+            </el-card>
+            <el-card shadow="never">
+              <template #header>
+                <div class="card-header">
+                  <span>基础分布图</span>
+                  <el-tag>ECharts</el-tag>
+                </div>
+              </template>
+              <div ref="chartRef" class="chart-box"></div>
+            </el-card>
+          </section>
+        </el-tab-pane>
+
+        <el-tab-pane label="电商指标" name="metric">
+          <el-form inline>
+            <el-form-item label="数据集">
+              <el-select v-model="metricForm.datasetId" placeholder="请选择数据集">
+                <el-option
+                  v-for="dataset in datasets"
+                  :key="dataset.datasetId"
+                  :label="`${dataset.datasetName} (${dataset.businessDomain})`"
+                  :value="dataset.datasetId"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="指标类型">
+              <el-select v-model="metricForm.metricType">
+                <el-option label="订单量趋势" value="ORDER_TREND" />
+                <el-option label="销售额趋势" value="SALES_TREND" />
+                <el-option label="热销商品排行" value="TOP_PRODUCTS" />
+                <el-option label="商品分类占比" value="CATEGORY_SHARE" />
+                <el-option label="库存预警视图" value="LOW_STOCK" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="时间字段">
+              <el-input v-model="metricForm.timeField" placeholder="可留空自动识别" />
+            </el-form-item>
+            <el-form-item label="数值字段">
+              <el-input v-model="metricForm.valueField" placeholder="可留空自动识别" />
+            </el-form-item>
+            <el-form-item label="分类字段">
+              <el-input v-model="metricForm.categoryField" placeholder="可留空自动识别" />
+            </el-form-item>
+            <el-form-item label="商品字段">
+              <el-input v-model="metricForm.productField" placeholder="可留空自动识别" />
+            </el-form-item>
+            <el-form-item label="销量字段">
+              <el-input v-model="metricForm.quantityField" placeholder="可留空自动识别" />
+            </el-form-item>
+            <el-form-item label="库存阈值">
+              <el-input-number v-model="metricForm.stockThreshold" :min="0" :max="9999" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="runMetricQuery">查询电商指标</el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-alert
+            class="notice-box"
+            :title="metricDescription || '支持订单量趋势、销售额趋势、热销商品、分类占比和库存预警查询。'"
+            type="success"
+            :closable="false"
+          />
+
+          <section class="two-column-grid notice-box">
+            <el-card shadow="never">
+              <template #header>
+                <div class="card-header">
+                  <span>指标图表</span>
+                  <el-tag>Metric</el-tag>
+                </div>
+              </template>
+              <div ref="metricChartRef" class="chart-box"></div>
+            </el-card>
+            <el-card shadow="never">
+              <template #header>
+                <div class="card-header">
+                  <span>指标明细</span>
+                  <el-tag>{{ metricData.length }} 条</el-tag>
+                </div>
+              </template>
+              <el-table :data="metricTable" stripe>
+                <el-table-column
+                  v-for="column in metricColumns"
+                  :key="column"
+                  :prop="column"
+                  :label="column"
+                />
+              </el-table>
+            </el-card>
+          </section>
+        </el-tab-pane>
+
+        <el-tab-pane label="数据集成" name="integration">
+          <el-form inline>
+            <el-form-item label="左数据集">
+              <el-select v-model="integrationForm.leftDatasetId" placeholder="请选择左侧数据集">
+                <el-option
+                  v-for="dataset in datasets"
+                  :key="dataset.datasetId"
+                  :label="`${dataset.datasetName} (${dataset.businessDomain})`"
+                  :value="dataset.datasetId"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="右数据集">
+              <el-select v-model="integrationForm.rightDatasetId" placeholder="请选择右侧数据集">
+                <el-option
+                  v-for="dataset in datasets"
+                  :key="dataset.datasetId"
+                  :label="`${dataset.datasetName} (${dataset.businessDomain})`"
+                  :value="dataset.datasetId"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="集成模式">
+              <el-select v-model="integrationForm.mode">
+                <el-option label="JOIN（关联）" value="JOIN" />
+                <el-option label="UNION（合并）" value="UNION" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="左关联字段">
+              <el-select v-model="integrationForm.leftField" :disabled="integrationForm.mode === 'UNION'">
+                <el-option v-for="field in leftMetadata" :key="field.fieldId" :label="field.fieldName" :value="field.fieldName" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="右关联字段">
+              <el-select v-model="integrationForm.rightField" :disabled="integrationForm.mode === 'UNION'">
+                <el-option v-for="field in rightMetadata" :key="field.fieldId" :label="field.fieldName" :value="field.fieldName" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="结果上限">
+              <el-input-number v-model="integrationForm.limit" :min="1" :max="1000" />
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" @click="runIntegration">执行数据集成</el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-alert
+            class="notice-box"
+            title="MVP 支持 JOIN/UNION，可用于用户+订单、商品+订单、商品+库存三类核心集成。"
+            type="info"
+            :closable="false"
+          />
+
+          <el-card shadow="never" class="notice-box">
+            <template #header>
+              <div class="card-header">
+                <span>集成结果</span>
+                <el-tag>{{ integrationResult?.total || 0 }} 条</el-tag>
+              </div>
+            </template>
+            <el-table :data="integrationResult?.records || []" stripe>
+              <el-table-column
+                v-for="column in integrationColumns"
+                :key="column"
+                :prop="column"
+                :label="column"
+              />
+            </el-table>
+          </el-card>
+        </el-tab-pane>
+      </el-tabs>
+    </el-card>
   </div>
 </template>

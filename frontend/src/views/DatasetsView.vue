@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { isAuthExpiredError } from '../api/client';
 import {
@@ -18,6 +18,7 @@ import { useAuthStore } from '../stores/auth';
 
 const authStore = useAuthStore();
 const datasets = ref<DatasetSummary[]>([]);
+const domainFilter = ref('');
 const metadata = ref<MetaField[]>([]);
 const previewPage = ref<PageResponse<Record<string, unknown>>>({
   pageNum: 1,
@@ -32,11 +33,15 @@ const previewFilters = reactive({
 });
 const canDeleteDataset = computed(() => authStore.hasAction('dataset.delete'));
 const canExportDataset = computed(() => authStore.hasAction('dataset.export'));
+const filteredDatasets = computed(() =>
+  !domainFilter.value ? datasets.value : datasets.value.filter((item) => item.businessDomain === domainFilter.value)
+);
 
 async function loadDatasets() {
   datasets.value = await listDatasets();
-  if (datasets.value.length > 0) {
-    await selectDataset(datasets.value[0].datasetId);
+  const first = filteredDatasets.value[0] || datasets.value[0];
+  if (first) {
+    await selectDataset(first.datasetId);
   }
 }
 
@@ -128,6 +133,21 @@ onMounted(async () => {
     ElMessage.error(`数据集加载失败: ${(error as Error).message}`);
   }
 });
+
+watch(
+  () => domainFilter.value,
+  (value) => {
+    if (!value || !selectedDataset.value) {
+      return;
+    }
+    if (selectedDataset.value.businessDomain !== value) {
+      const next = filteredDatasets.value[0];
+      if (next) {
+        void selectDataset(next.datasetId);
+      }
+    }
+  }
+);
 </script>
 
 <template>
@@ -139,8 +159,22 @@ onMounted(async () => {
           <el-tag type="success">Real Data</el-tag>
         </div>
       </template>
-      <el-table :data="datasets" stripe @row-click="handleRowClick">
+      <el-form inline class="notice-box">
+        <el-form-item label="业务域">
+          <el-select v-model="domainFilter" clearable placeholder="全部业务域">
+            <el-option label="用户域" value="USER" />
+            <el-option label="商品域" value="PRODUCT" />
+            <el-option label="交易域" value="TRADE" />
+            <el-option label="支付域" value="PAYMENT" />
+            <el-option label="库存域" value="INVENTORY" />
+            <el-option label="评价域" value="REVIEW" />
+            <el-option label="行为日志域" value="BEHAVIOR_LOG" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <el-table :data="filteredDatasets" stripe @row-click="handleRowClick">
         <el-table-column prop="datasetName" label="数据集名称" />
+        <el-table-column prop="businessDomain" label="业务域" width="130" />
         <el-table-column prop="formatType" label="格式" width="120" />
         <el-table-column prop="recordCount" label="记录数" width="120" />
         <el-table-column prop="fieldCount" label="字段数" width="120" />
@@ -152,6 +186,7 @@ onMounted(async () => {
           </template>
         </el-table-column>
       </el-table>
+      <el-empty v-if="filteredDatasets.length === 0" description="当前业务域下暂无数据集" />
     </el-card>
 
     <el-card shadow="never">

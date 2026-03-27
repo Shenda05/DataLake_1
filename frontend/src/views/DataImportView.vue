@@ -9,6 +9,7 @@ import {
   listDatabaseTables,
   listImportHistory,
   previewDatabaseTable,
+  type BusinessDomain,
   type DataSource,
   type DatabasePreview,
   type DatabaseTableOption,
@@ -25,15 +26,26 @@ const activeTab = ref<'file' | 'database'>('file');
 const databaseTables = ref<DatabaseTableOption[]>([]);
 const databasePreview = ref<DatabasePreview | null>(null);
 const dbLoading = ref(false);
+const BUSINESS_DOMAIN_OPTIONS: { label: string; value: BusinessDomain }[] = [
+  { label: '用户域', value: 'USER' },
+  { label: '商品域', value: 'PRODUCT' },
+  { label: '交易域', value: 'TRADE' },
+  { label: '支付域', value: 'PAYMENT' },
+  { label: '库存域', value: 'INVENTORY' },
+  { label: '评价域', value: 'REVIEW' },
+  { label: '行为日志域', value: 'BEHAVIOR_LOG' }
+];
 const fileForm = reactive({
   sourceId: undefined as number | undefined,
-  datasetName: ''
+  datasetName: '',
+  businessDomain: 'TRADE' as BusinessDomain
 });
 const databaseForm = reactive({
   sourceId: undefined as number | undefined,
   schemaName: '',
   tableName: '',
   datasetName: '',
+  businessDomain: 'TRADE' as BusinessDomain,
   description: ''
 });
 
@@ -73,6 +85,7 @@ async function submitFileImport() {
     const payload = new FormData();
     payload.append('file', selectedFile.value);
     payload.append('datasetName', fileForm.datasetName);
+    payload.append('businessDomain', fileForm.businessDomain);
     payload.append('sourceId', String(fileForm.sourceId));
     const result = await importFile(payload);
     ElMessage.success(`导入成功，生成数据集 ${result.datasetName}`);
@@ -155,6 +168,7 @@ async function submitDatabaseImport() {
       schemaName: databaseForm.schemaName || undefined,
       tableName: databaseForm.tableName,
       datasetName: databaseForm.datasetName,
+      businessDomain: databaseForm.businessDomain,
       description: databaseForm.description
     });
     ElMessage.success(`数据库表导入成功，生成数据集 ${result.datasetName}`);
@@ -221,7 +235,7 @@ onMounted(async () => {
     <el-card shadow="never">
       <template #header>
         <div class="card-header">
-          <span>数据接入</span>
+          <span>电商数据接入</span>
           <el-tag type="success">Real Import</el-tag>
         </div>
       </template>
@@ -242,6 +256,16 @@ onMounted(async () => {
                 </el-form-item>
                 <el-form-item label="数据集名称">
                   <el-input v-model="fileForm.datasetName" placeholder="请输入数据集名称" />
+                </el-form-item>
+                <el-form-item label="业务域">
+                  <el-select v-model="fileForm.businessDomain">
+                    <el-option
+                      v-for="domain in BUSINESS_DOMAIN_OPTIONS"
+                      :key="domain.value"
+                      :label="domain.label"
+                      :value="domain.value"
+                    />
+                  </el-select>
                 </el-form-item>
                 <el-form-item label="上传文件">
                   <input type="file" accept=".csv,.json,.xls,.xlsx" @change="onFileChange" />
@@ -286,6 +310,16 @@ onMounted(async () => {
               </el-form-item>
               <el-form-item label="数据集名称">
                 <el-input v-model="databaseForm.datasetName" placeholder="导入后的数据集名称" />
+              </el-form-item>
+              <el-form-item label="业务域">
+                <el-select v-model="databaseForm.businessDomain">
+                  <el-option
+                    v-for="domain in BUSINESS_DOMAIN_OPTIONS"
+                    :key="domain.value"
+                    :label="domain.label"
+                    :value="domain.value"
+                  />
+                </el-select>
               </el-form-item>
               <el-form-item label="说明">
                 <el-input v-model="databaseForm.description" type="textarea" :rows="3" placeholder="例如：外部业务库表快照导入" />
@@ -343,6 +377,7 @@ onMounted(async () => {
       <el-table :data="history" stripe>
         <el-table-column prop="importId" label="导入编号" width="100" />
         <el-table-column prop="datasetName" label="数据集" />
+        <el-table-column prop="businessDomain" label="业务域" width="130" />
         <el-table-column prop="formatType" label="格式" width="120" />
         <el-table-column prop="recordCount" label="记录数" width="100" />
         <el-table-column prop="status" label="状态" width="120" />

@@ -1,5 +1,14 @@
 import { apiDelete, apiDownload, apiDownloadPost, apiGet, apiPost, apiPut, apiUpload } from './client';
 
+export type BusinessDomain =
+  | 'USER'
+  | 'PRODUCT'
+  | 'TRADE'
+  | 'PAYMENT'
+  | 'INVENTORY'
+  | 'REVIEW'
+  | 'BEHAVIOR_LOG';
+
 export type LoginResult = {
   token: string;
   username: string;
@@ -25,6 +34,7 @@ export type ImportHistory = {
   importId: number;
   sourceId?: number | null;
   datasetName: string;
+  businessDomain: BusinessDomain;
   formatType: string;
   status: string;
   recordCount: number;
@@ -55,6 +65,7 @@ export type DatabasePreview = {
 export type DatasetSummary = {
   datasetId: number;
   datasetName: string;
+  businessDomain: BusinessDomain;
   sourceId?: number | null;
   formatType: string;
   recordCount: number;
@@ -87,6 +98,32 @@ export type PageResponse<T> = {
   pageSize: number;
   total: number;
   records: T[];
+};
+
+export type MetricPoint = {
+  name: string;
+  value: number;
+};
+
+export type EcommerceMetricResponse = {
+  metricType: string;
+  chart: MetricPoint[];
+  table: Record<string, unknown>[];
+  description: string;
+};
+
+export type IntegrationResponse = {
+  mode: 'JOIN' | 'UNION' | string;
+  columns: string[];
+  total: number;
+  records: Record<string, unknown>[];
+};
+
+export type EcommerceOverviewResponse = {
+  orderTrend: { day: string; value: number }[];
+  salesTrend: { day: string; value: number }[];
+  topProducts: { name: string; value: number }[];
+  lowStockCount: number;
 };
 
 export type GovernanceStep = {
@@ -204,7 +241,12 @@ export function getOverview() {
     runningTasks: number;
     successTasks: number;
     failedTasks: number;
+    recentFailedTasks: number;
   }>('/dashboard/overview');
+}
+
+export function getEcommerceOverview() {
+  return apiGet<EcommerceOverviewResponse>('/dashboard/ecommerce');
 }
 
 export function getTaskTrend() {
@@ -252,6 +294,7 @@ export function importDatabase(payload: {
   schemaName?: string;
   tableName: string;
   datasetName: string;
+  businessDomain?: BusinessDomain;
   description?: string;
 }) {
   return apiPost<{
@@ -349,6 +392,30 @@ export function getAnalysisSummary(datasetId: number) {
 
 export function getAnalysisCharts(datasetId: number) {
   return apiGet<{ name: string; value: number }[]>(`/analysis/${datasetId}/charts`);
+}
+
+export function queryEcommerceMetric(payload: {
+  datasetId: number;
+  metricType: 'ORDER_TREND' | 'SALES_TREND' | 'TOP_PRODUCTS' | 'CATEGORY_SHARE' | 'LOW_STOCK';
+  timeField?: string;
+  valueField?: string;
+  categoryField?: string;
+  productField?: string;
+  quantityField?: string;
+  stockThreshold?: number;
+}) {
+  return apiPost<EcommerceMetricResponse>('/queries/ecommerce-metric', payload);
+}
+
+export function queryIntegration(payload: {
+  leftDatasetId: number;
+  rightDatasetId: number;
+  mode: 'JOIN' | 'UNION';
+  leftField?: string;
+  rightField?: string;
+  limit?: number;
+}) {
+  return apiPost<IntegrationResponse>('/queries/integration', payload);
 }
 
 export function listGovernanceOperators() {

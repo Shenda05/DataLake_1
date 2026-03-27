@@ -131,6 +131,7 @@ public class GovernanceService {
         DatasetService.CreatedDataset createdDataset = datasetService.createDatasetFromRows(
             inputDataset.sourceId(),
             outputDatasetName,
+            inputDataset.businessDomain(),
             inputDataset.formatType(),
             inputDataset.storagePath(),
             "治理流程输出数据集",
@@ -208,7 +209,12 @@ public class GovernanceService {
         return switch (step.operatorKey().toUpperCase(Locale.ROOT)) {
             case "NULL_FILL" -> nullFill(rows, requireField(step), param(step.params(), "fillValue", "UNKNOWN"));
             case "DEDUPLICATE" -> deduplicate(rows, parseFields(step.params()));
+            case "ORDER_DEDUP" -> orderDedup(rows, step.params());
             case "FIELD_CONVERT" -> fieldConvert(metadata, rows, requireField(step), param(step.params(), "transform", "TRIM"));
+            case "AMOUNT_NORMALIZE" -> amountNormalize(metadata, rows, requireField(step));
+            case "TIME_NORMALIZE" -> timeNormalize(rows, requireField(step));
+            case "CATEGORY_NORMALIZE" -> categoryNormalize(rows, requireField(step));
+            case "STATUS_NORMALIZE" -> statusNormalize(rows, requireField(step));
             case "FILTER_KEEP" -> filterKeep(rows, requireField(step), param(step.params(), "operator", "LIKE"), param(step.params(), "value", param(step.params(), "keyword", "")));
             default -> throw new IllegalArgumentException("不支持的治理算子: " + step.operatorKey());
         };
@@ -239,6 +245,19 @@ public class GovernanceService {
         return new ArrayList<>(unique.values());
     }
 
+    private List<Map<String, Object>> orderDedup(List<Map<String, Object>> rows, Map<String, Object> params) {
+        List<String> fields = parseFields(params);
+        if (fields.isEmpty()) {
+            for (String candidate : List.of("order_id", "order_no", "id")) {
+                if (rows.stream().findFirst().map(row -> row.containsKey(candidate)).orElse(false)) {
+                    fields = List.of(candidate);
+                    break;
+                }
+            }
+        }
+        return deduplicate(rows, fields);
+    }
+
     private List<Map<String, Object>> fieldConvert(
         List<DatasetService.MetaFieldRecord> metadata,
         List<Map<String, Object>> rows,
@@ -263,6 +282,54 @@ public class GovernanceService {
                 default -> text.trim();
             };
             copied.put(field, converted);
+            result.add(copied);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> amountNormalize(
+        List<DatasetService.MetaFieldRecord> metadata,
+        List<Map<String, Object>> rows,
+        String field
+    ) {
+        updateFieldType(metadata, field, "NUMBER");
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> copied = new LinkedHashMap<>(row);
+            copied.put(field, normalizeAmountValue(row.get(field)));
+            result.add(copied);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> timeNormalize(List<Map<String, Object>> rows, String field) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> copied = new LinkedHashMap<>(row);
+            Object value = row.get(field);
+            copied.put(field, normalizeTimeValue(value));
+            result.add(copied);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> categoryNormalize(List<Map<String, Object>> rows, String field) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> copied = new LinkedHashMap<>(row);
+            Object value = row.get(field);
+            copied.put(field, normalizeCategoryValue(value));
+            result.add(copied);
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> statusNormalize(List<Map<String, Object>> rows, String field) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> copied = new LinkedHashMap<>(row);
+            Object value = row.get(field);
+            copied.put(field, normalizeStatusValue(value));
             result.add(copied);
         }
         return result;
@@ -299,6 +366,118 @@ public class GovernanceService {
             return Long.parseLong(text);
         }
         return Double.parseDouble(text);
+    }
+
+    private Object normalizeAmountValue(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        String text = String.valueOf(raw).trim();
+        if (text.isBlank()) {
+            return null;
+        }
+        String normalized = text.replaceAll("[^0-9.\\-]", "");
+        if (normalized.isBlank() || "-".equals(normalized) || ".".equals(normalized) || "-.".equals(normalized)) {
+            return null;
+        }
+        return Math.round(Double.parseDouble(normalized) * 100.0d) / 100.0d;
+    }
+
+    private Object normalizeTimeValue(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        if (raw instanceof java.time.LocalDateTime localDateTime) {
+            return localDateTime.toString();
+        }
+        if (raw instanceof java.time.LocalDate localDate) {
+            return localDate.atStartOfDay().toString();
+        }
+        if (raw instanceof java.sql.Timestamp timestamp) {
+            return timestamp.toLocalDateTime().toString();
+        }
+        if (raw instanceof java.sql.Date date) {
+            return date.toLocalDate().atStartOfDay().toString();
+        }
+        String text = String.valueOf(raw).trim();
+        if (text.isBlank()) {
+            return null;
+        }
+        List<java.time.format.DateTimeFormatter> dateTimeFormats = List.of(
+            java.time.format.DateTimeFormatter.ISO_DATE_TIME,
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
+            java.time.format.DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss"),
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"),
+            java.time.format.DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm")
+        );
+        for (java.time.format.DateTimeFormatter formatter : dateTimeFormats) {
+            try {
+                return java.time.LocalDateTime.parse(text, formatter).toString();
+            } catch (Exception ignored) {
+            }
+        }
+        List<java.time.format.DateTimeFormatter> dateFormats = List.of(
+            java.time.format.DateTimeFormatter.ISO_DATE,
+            java.time.format.DateTimeFormatter.ofPattern("yyyy/MM/dd")
+        );
+        for (java.time.format.DateTimeFormatter formatter : dateFormats) {
+            try {
+                return java.time.LocalDate.parse(text, formatter).atStartOfDay().toString();
+            } catch (Exception ignored) {
+            }
+        }
+        return text;
+    }
+
+    private Object normalizeCategoryValue(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        String text = String.valueOf(raw).trim();
+        if (text.isBlank()) {
+            return null;
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (lower.contains("手机") || lower.contains("phone")) {
+            return "3C数码";
+        }
+        if (lower.contains("食品") || lower.contains("food")) {
+            return "食品生鲜";
+        }
+        if (lower.contains("服装") || lower.contains("clothes") || lower.contains("fashion")) {
+            return "服饰鞋包";
+        }
+        if (lower.contains("家电") || lower.contains("appliance")) {
+            return "家用电器";
+        }
+        return text.toUpperCase(Locale.ROOT);
+    }
+
+    private Object normalizeStatusValue(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        String text = String.valueOf(raw).trim();
+        if (text.isBlank()) {
+            return null;
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (List.of("paid", "success", "已支付", "支付成功", "completed").contains(lower)) {
+            return "PAID";
+        }
+        if (List.of("pending", "待支付", "created", "new").contains(lower)) {
+            return "PENDING";
+        }
+        if (List.of("cancelled", "canceled", "已取消", "closed").contains(lower)) {
+            return "CANCELLED";
+        }
+        if (List.of("refunded", "已退款").contains(lower)) {
+            return "REFUNDED";
+        }
+        if (List.of("failed", "失败").contains(lower)) {
+            return "FAILED";
+        }
+        return text.toUpperCase(Locale.ROOT);
     }
 
     private void updateFieldType(List<DatasetService.MetaFieldRecord> metadata, String field, String transform) {

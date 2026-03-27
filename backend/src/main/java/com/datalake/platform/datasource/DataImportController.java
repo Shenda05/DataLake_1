@@ -31,6 +31,7 @@ public class DataImportController {
     public ApiResponse<?> importFile(
         @RequestParam("file") MultipartFile file,
         @RequestParam("datasetName") @NotBlank String datasetName,
+        @RequestParam(value = "businessDomain", required = false) String businessDomain,
         @RequestParam("sourceId") Long sourceId,
         HttpServletRequest request
     ) {
@@ -39,7 +40,7 @@ public class DataImportController {
         }
         try {
             return ApiResponse.success(
-                dataImportService.importFile(file, datasetName, sourceId, SecurityUtils.currentUser().userId()),
+                dataImportService.importFile(file, datasetName, businessDomain, sourceId, SecurityUtils.currentUser().userId()),
                 requestId(request)
             );
         } catch (Exception exception) {
@@ -59,6 +60,7 @@ public class DataImportController {
                 body.schemaName(),
                 body.tableName(),
                 body.datasetName(),
+                body.businessDomain(),
                 body.description(),
                 SecurityUtils.currentUser().userId()
             ),
@@ -107,6 +109,7 @@ public class DataImportController {
         String schemaName,
         @NotBlank(message = "tableName 不能为空") String tableName,
         @NotBlank(message = "datasetName 不能为空") String datasetName,
+        String businessDomain,
         String description
     ) {
     }

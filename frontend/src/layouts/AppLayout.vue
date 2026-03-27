@@ -9,14 +9,14 @@ const authStore = useAuthStore();
 let profileSyncTimer: number | undefined;
 
 const menuItems = computed(() => [
-  { label: '首页', key: 'dashboard', path: '/dashboard' },
+  { label: '电商仪表盘', key: 'dashboard', path: '/dashboard' },
   { label: '数据源管理', key: 'data-sources', path: '/data-sources' },
-  { label: '数据接入', key: 'imports', path: '/imports' },
-  { label: '数据集管理', key: 'datasets', path: '/datasets' },
-  { label: '查询分析', key: 'queries', path: '/queries' },
-  { label: '数据治理', key: 'governance', path: '/governance' },
-  { label: '任务调度', key: 'tasks', path: '/tasks' },
-  { label: '日志监控', key: 'logs', path: '/logs' },
+  { label: '电商数据接入', key: 'imports', path: '/imports' },
+  { label: '电商数据集', key: 'datasets', path: '/datasets' },
+  { label: '电商查询分析', key: 'queries', path: '/queries' },
+  { label: '电商数据治理', key: 'governance', path: '/governance' },
+  { label: '电商任务调度', key: 'tasks', path: '/tasks' },
+  { label: '任务与日志', key: 'logs', path: '/logs' },
   { label: '用户与权限', key: 'users', path: '/users' }
 ].filter((item) => authStore.allowedMenus.includes(item.key as never)));
 
@@ -67,8 +67,8 @@ onBeforeUnmount(() => {
   <el-container class="app-shell">
     <el-aside class="sidebar" width="240px">
       <div class="brand">
-        <p class="brand-eyebrow">Data Lake</p>
-        <h1>管理平台</h1>
+        <p class="brand-eyebrow">E-commerce</p>
+        <h1>数据湖平台</h1>
       </div>
       <el-menu
         :default-active="route.path"
@@ -88,7 +88,7 @@ onBeforeUnmount(() => {
       <el-header class="topbar">
         <div>
           <p class="topbar-title">{{ route.meta.title }}</p>
-          <span class="topbar-subtitle">面向课程项目的可视化数据湖控制台</span>
+          <span class="topbar-subtitle">订单、商品、库存优先的电商数据湖控制台</span>
         </div>
         <div class="topbar-user">
           <span>{{ authStore.profile?.displayName }}</span>

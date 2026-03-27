@@ -32,6 +32,11 @@ public class DashboardController {
         return ApiResponse.success(dashboardService.recentTasks(), requestId(request));
     }
 
+    @GetMapping("/ecommerce")
+    public ApiResponse<?> ecommerce(HttpServletRequest request) {
+        return ApiResponse.success(dashboardService.ecommerce(), requestId(request));
+    }
+
     private String requestId(HttpServletRequest request) {
         return request.getAttribute(RequestIdFilter.REQUEST_ID_ATTR).toString();
     }

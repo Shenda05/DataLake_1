@@ -260,6 +260,7 @@ public class TaskService {
     }
 
     private ExecutionOutcome runTask(TaskRecord task, Long userId) {
+        // [旧通用版共用] 保留 IMPORT/GOVERNANCE 调度与重试引擎，电商任务通过模板命名映射到该骨架。
         return switch (task.taskType().toUpperCase(Locale.ROOT)) {
             case "IMPORT" -> {
                 DataImportService.ImportResult result = dataImportService.rerunImport(task.targetId(), userId, task.taskName());

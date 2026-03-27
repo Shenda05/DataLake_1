@@ -1,5 +1,6 @@
 package com.datalake.platform.datasource;
 
+import com.datalake.platform.common.domain.BusinessDomainCatalog;
 import com.datalake.platform.common.util.GeneratedKeyUtils;
 import com.datalake.platform.common.util.SqlNameUtils;
 import com.datalake.platform.dataset.DatasetService;
@@ -57,7 +58,8 @@ public class DataImportService {
         this.storageRoot = Path.of(storageRoot).toAbsolutePath().normalize();
     }
 
-    public ImportResult importFile(MultipartFile file, String datasetName, Long sourceId, Long userId) throws IOException {
+    public ImportResult importFile(MultipartFile file, String datasetName, String businessDomain, Long sourceId, Long userId) throws IOException {
+        String normalizedDomain = BusinessDomainCatalog.normalize(businessDomain);
         String originalFilename = file.getOriginalFilename();
         if (originalFilename == null) {
             throw new IllegalArgumentException("文件名不能为空");
@@ -74,6 +76,7 @@ public class DataImportService {
             DatasetService.CreatedDataset dataset = datasetService.createImportedDataset(
                 sourceId,
                 datasetName,
+                normalizedDomain,
                 parsedFile.formatType(),
                 target.toString(),
                 "文件导入生成的数据集",
@@ -84,6 +87,7 @@ public class DataImportService {
             Long importId = insertImportRecord(
                 sourceId,
                 datasetName,
+                normalizedDomain,
                 parsedFile.formatType(),
                 originalFilename,
                 target.toString(),
@@ -92,14 +96,32 @@ public class DataImportService {
                 null,
                 userId
             );
-            return new ImportResult(importId, dataset.datasetId(), dataset.datasetName(), parsedFile.formatType(), dataset.recordCount(), "SUCCESS", "");
+            return new ImportResult(
+                importId,
+                dataset.datasetId(),
+                dataset.datasetName(),
+                normalizedDomain,
+                parsedFile.formatType(),
+                dataset.recordCount(),
+                "SUCCESS",
+                ""
+            );
         } catch (Exception exception) {
-            insertImportRecord(sourceId, datasetName, detectFormat(originalFilename), originalFilename, target.toString(), "FAILED", 0, exception.getMessage(), userId);
+            insertImportRecord(sourceId, datasetName, normalizedDomain, detectFormat(originalFilename), originalFilename, target.toString(), "FAILED", 0, exception.getMessage(), userId);
             throw new IllegalArgumentException("导入失败: " + exception.getMessage(), exception);
         }
     }
 
-    public ImportResult importDatabaseTable(Long sourceId, String schemaName, String tableName, String datasetName, String description, Long userId) {
+    public ImportResult importDatabaseTable(
+        Long sourceId,
+        String schemaName,
+        String tableName,
+        String datasetName,
+        String businessDomain,
+        String description,
+        Long userId
+    ) {
+        String normalizedDomain = BusinessDomainCatalog.normalize(businessDomain);
         DatabaseTableSnapshot snapshot = readDatabaseTableSnapshot(sourceId, schemaName, tableName, 0);
         String storagePath = buildDatabaseImportPath(sourceId, snapshot.schemaName(), snapshot.tableName());
         String originalName = buildOriginalTableName(snapshot.schemaName(), snapshot.tableName());
@@ -107,6 +129,7 @@ public class DataImportService {
             DatasetService.CreatedDataset dataset = datasetService.createDatasetFromRows(
                 sourceId,
                 datasetName,
+                normalizedDomain,
                 "MYSQL_TABLE",
                 storagePath,
                 description == null || description.isBlank() ? "数据库表导入生成的数据集" : description,
@@ -117,6 +140,7 @@ public class DataImportService {
             Long importId = insertImportRecord(
                 sourceId,
                 datasetName,
+                normalizedDomain,
                 "MYSQL_TABLE",
                 originalName,
                 storagePath,
@@ -125,9 +149,18 @@ public class DataImportService {
                 null,
                 userId
             );
-            return new ImportResult(importId, dataset.datasetId(), dataset.datasetName(), "MYSQL_TABLE", dataset.recordCount(), "SUCCESS", "");
+            return new ImportResult(
+                importId,
+                dataset.datasetId(),
+                dataset.datasetName(),
+                normalizedDomain,
+                "MYSQL_TABLE",
+                dataset.recordCount(),
+                "SUCCESS",
+                ""
+            );
         } catch (Exception exception) {
-            insertImportRecord(sourceId, datasetName, "MYSQL_TABLE", originalName, storagePath, "FAILED", 0, exception.getMessage(), userId);
+            insertImportRecord(sourceId, datasetName, normalizedDomain, "MYSQL_TABLE", originalName, storagePath, "FAILED", 0, exception.getMessage(), userId);
             throw new IllegalArgumentException("数据库表导入失败: " + exception.getMessage(), exception);
         }
     }
@@ -147,6 +180,7 @@ public class DataImportService {
             DatasetService.CreatedDataset dataset = datasetService.createImportedDataset(
                 detail.sourceId(),
                 datasetName,
+                detail.businessDomain(),
                 parsedFile.formatType(),
                 path.toString(),
                 "任务调度重新导入的数据集",
@@ -157,6 +191,7 @@ public class DataImportService {
             Long newImportId = insertImportRecord(
                 detail.sourceId(),
                 datasetName,
+                detail.businessDomain(),
                 parsedFile.formatType(),
                 detail.originalFileName(),
                 path.toString(),
@@ -165,11 +200,21 @@ public class DataImportService {
                 null,
                 userId
             );
-            return new ImportResult(newImportId, dataset.datasetId(), dataset.datasetName(), parsedFile.formatType(), dataset.recordCount(), "SUCCESS", "");
+            return new ImportResult(
+                newImportId,
+                dataset.datasetId(),
+                dataset.datasetName(),
+                detail.businessDomain(),
+                parsedFile.formatType(),
+                dataset.recordCount(),
+                "SUCCESS",
+                ""
+            );
         } catch (Exception exception) {
             insertImportRecord(
                 detail.sourceId(),
                 datasetName,
+                detail.businessDomain(),
                 detail.formatType(),
                 detail.originalFileName(),
                 path.toString(),
@@ -223,7 +268,7 @@ public class DataImportService {
     public List<ImportHistoryItem> history() {
         return jdbcTemplate.query(
             """
-                select import_id,source_id,dataset_name,format_type,status,record_count,error_message,create_time
+                select import_id,source_id,dataset_name,business_domain,format_type,status,record_count,error_message,create_time
                 from import_record
                 order by import_id desc
             """,
@@ -231,6 +276,7 @@ public class DataImportService {
                 rs.getLong("import_id"),
                 (Long) rs.getObject("source_id"),
                 rs.getString("dataset_name"),
+                rs.getString("business_domain"),
                 rs.getString("format_type"),
                 rs.getString("status"),
                 rs.getLong("record_count"),
@@ -243,7 +289,7 @@ public class DataImportService {
     public ImportDetail detail(Long importId) {
         ImportDetail detail = jdbcTemplate.query(
             """
-                select import_id,source_id,dataset_name,format_type,original_file_name,file_path,status,record_count,error_message,create_user,create_time
+                select import_id,source_id,dataset_name,business_domain,format_type,original_file_name,file_path,status,record_count,error_message,create_user,create_time
                 from import_record
                 where import_id = ?
             """,
@@ -252,6 +298,7 @@ public class DataImportService {
                     rs.getLong("import_id"),
                     (Long) rs.getObject("source_id"),
                     rs.getString("dataset_name"),
+                    rs.getString("business_domain"),
                     rs.getString("format_type"),
                     rs.getString("original_file_name"),
                     rs.getString("file_path"),
@@ -273,7 +320,15 @@ public class DataImportService {
     private ImportResult rerunDatabaseImport(ImportDetail detail, Long userId, String triggerName) {
         DatabaseImportPath location = parseDatabaseImportPath(detail.filePath());
         String datasetName = buildRerunDatasetName(detail.datasetName(), triggerName);
-        return importDatabaseTable(detail.sourceId(), location.schemaName(), location.tableName(), datasetName, "任务调度重新导入的数据集", userId);
+        return importDatabaseTable(
+            detail.sourceId(),
+            location.schemaName(),
+            location.tableName(),
+            datasetName,
+            detail.businessDomain(),
+            "任务调度重新导入的数据集",
+            userId
+        );
     }
 
     private DatabaseTableSnapshot readDatabaseTableSnapshot(Long sourceId, String schemaName, String tableName, int limit) {
@@ -397,6 +452,7 @@ public class DataImportService {
     private Long insertImportRecord(
         Long sourceId,
         String datasetName,
+        String businessDomain,
         String formatType,
         String originalFilename,
         String filePath,
@@ -409,21 +465,22 @@ public class DataImportService {
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
                 """
-                    insert into import_record(source_id,dataset_name,format_type,original_file_name,file_path,status,record_count,error_message,create_user,create_time)
-                    values(?,?,?,?,?,?,?,?,?,?)
+                    insert into import_record(source_id,dataset_name,business_domain,format_type,original_file_name,file_path,status,record_count,error_message,create_user,create_time)
+                    values(?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 Statement.RETURN_GENERATED_KEYS
             );
             statement.setObject(1, sourceId);
             statement.setString(2, datasetName);
-            statement.setString(3, formatType);
-            statement.setString(4, originalFilename);
-            statement.setString(5, filePath);
-            statement.setString(6, status);
-            statement.setLong(7, recordCount);
-            statement.setString(8, errorMessage);
-            statement.setLong(9, userId);
-            statement.setTimestamp(10, Timestamp.from(java.time.Instant.now()));
+            statement.setString(3, BusinessDomainCatalog.normalize(businessDomain));
+            statement.setString(4, formatType);
+            statement.setString(5, originalFilename);
+            statement.setString(6, filePath);
+            statement.setString(7, status);
+            statement.setLong(8, recordCount);
+            statement.setString(9, errorMessage);
+            statement.setLong(10, userId);
+            statement.setTimestamp(11, Timestamp.from(java.time.Instant.now()));
             return statement;
         }, keyHolder);
         return GeneratedKeyUtils.getLongId(keyHolder, "import_id");
@@ -524,6 +581,7 @@ public class DataImportService {
         Long importId,
         Long datasetId,
         String datasetName,
+        String businessDomain,
         String formatType,
         int recordCount,
         String status,
@@ -535,6 +593,7 @@ public class DataImportService {
         Long importId,
         Long sourceId,
         String datasetName,
+        String businessDomain,
         String formatType,
         String status,
         Long recordCount,
@@ -547,6 +606,7 @@ public class DataImportService {
         Long importId,
         Long sourceId,
         String datasetName,
+        String businessDomain,
         String formatType,
         String originalFileName,
         String filePath,

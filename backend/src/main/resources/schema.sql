@@ -38,6 +38,7 @@ CREATE TABLE import_record (
     import_id BIGINT PRIMARY KEY AUTO_INCREMENT,
     source_id BIGINT,
     dataset_name VARCHAR(128) NOT NULL,
+    business_domain VARCHAR(32) NOT NULL DEFAULT 'TRADE',
     format_type VARCHAR(32) NOT NULL,
     original_file_name VARCHAR(255) NOT NULL,
     file_path VARCHAR(512) NOT NULL,
@@ -52,6 +53,7 @@ CREATE TABLE import_record (
 CREATE TABLE data_set (
     dataset_id BIGINT PRIMARY KEY AUTO_INCREMENT,
     dataset_name VARCHAR(128) NOT NULL UNIQUE,
+    business_domain VARCHAR(32) NOT NULL DEFAULT 'TRADE',
     source_id BIGINT,
     format_type VARCHAR(32) NOT NULL,
     record_count BIGINT DEFAULT 0,

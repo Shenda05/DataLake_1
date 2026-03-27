@@ -31,8 +31,33 @@ const form = reactive({
   executionName: ''
 });
 const steps = ref<EditableStep[]>([
-  { operatorKey: 'NULL_FILL', paramsText: '{\n  "field": "industry",\n  "fillValue": "UNKNOWN"\n}' }
+  { operatorKey: 'ORDER_DEDUP', paramsText: '{\n  "field": "order_id"\n}' },
+  { operatorKey: 'AMOUNT_NORMALIZE', paramsText: '{\n  "field": "amount"\n}' },
+  { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' }
 ]);
+// [Ecom-MVP Completed] 电商治理流程模板，复用通用治理引擎
+const ecommerceFlowTemplates = [
+  {
+    key: 'ORDER',
+    label: '订单自动治理',
+    flowName: '订单自动治理流程',
+    steps: [
+      { operatorKey: 'ORDER_DEDUP', paramsText: '{\n  "field": "order_id"\n}' },
+      { operatorKey: 'AMOUNT_NORMALIZE', paramsText: '{\n  "field": "amount"\n}' },
+      { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' },
+      { operatorKey: 'STATUS_NORMALIZE', paramsText: '{\n  "field": "order_status"\n}' }
+    ]
+  },
+  {
+    key: 'PRODUCT',
+    label: '商品分类治理',
+    flowName: '商品分类标准化流程',
+    steps: [
+      { operatorKey: 'CATEGORY_NORMALIZE', paramsText: '{\n  "field": "category"\n}' },
+      { operatorKey: 'STATUS_NORMALIZE', paramsText: '{\n  "field": "status"\n}' }
+    ]
+  }
+];
 const authStore = useAuthStore();
 const canManageGovernance = computed(() => authStore.hasAction('governance.manage'));
 const canExecuteGovernance = computed(() => authStore.hasAction('governance.execute'));
@@ -88,7 +113,11 @@ function resetForm() {
   editingFlowId.value = null;
   form.flowName = '';
   form.executionName = '';
-  steps.value = [{ operatorKey: 'NULL_FILL', paramsText: '{\n  "field": "industry",\n  "fillValue": "UNKNOWN"\n}' }];
+  steps.value = [
+    { operatorKey: 'ORDER_DEDUP', paramsText: '{\n  "field": "order_id"\n}' },
+    { operatorKey: 'AMOUNT_NORMALIZE', paramsText: '{\n  "field": "amount"\n}' },
+    { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' }
+  ];
 }
 
 function loadFlow(flow: GovernanceFlow) {
@@ -100,6 +129,17 @@ function loadFlow(flow: GovernanceFlow) {
     operatorKey: step.operatorKey,
     paramsText: JSON.stringify(step.params || {}, null, 2)
   }));
+}
+
+function applyEcommerceTemplate(templateKey: string) {
+  const template = ecommerceFlowTemplates.find((item) => item.key === templateKey);
+  if (!template) {
+    return;
+  }
+  form.flowName = template.flowName;
+  form.executionName = template.flowName;
+  steps.value = template.steps.map((step) => ({ ...step }));
+  ElMessage.success(`已套用模板：${template.label}`);
 }
 
 function buildOperatorChain() {
@@ -189,7 +229,7 @@ onMounted(async () => {
       <el-card shadow="never">
         <template #header>
           <div class="card-header">
-            <span>可用算子</span>
+            <span>电商治理算子（兼容通用）</span>
             <el-tag type="success">Real API</el-tag>
           </div>
         </template>
@@ -204,13 +244,25 @@ onMounted(async () => {
       <el-card shadow="never">
         <template #header>
           <div class="card-header">
-            <span>{{ editingFlowId ? '编辑治理流程' : '治理流程编排' }}</span>
+            <span>{{ editingFlowId ? '编辑电商治理流程' : '电商治理流程编排' }}</span>
             <div>
               <el-button link type="primary" @click="resetForm">重置</el-button>
               <el-button type="primary" :loading="loading" :disabled="!canExecuteGovernance" @click="executeFlow">执行流程</el-button>
             </div>
           </div>
         </template>
+        <div class="card-header-actions">
+          <span class="inline-tip">快捷模板：</span>
+          <el-button
+            v-for="template in ecommerceFlowTemplates"
+            :key="template.key"
+            size="small"
+            :disabled="!canEditWorkflow"
+            @click="applyEcommerceTemplate(template.key)"
+          >
+            {{ template.label }}
+          </el-button>
+        </div>
         <el-alert
           v-if="governancePermissionHint"
           class="notice-box"
@@ -224,13 +276,13 @@ onMounted(async () => {
               <el-option
                 v-for="dataset in datasets"
                 :key="dataset.datasetId"
-                :label="dataset.datasetName"
+                :label="`${dataset.datasetName} (${dataset.businessDomain})`"
                 :value="dataset.datasetId"
               />
             </el-select>
           </el-form-item>
           <el-form-item label="流程名称">
-            <el-input v-model="form.flowName" placeholder="例如 企业画像清洗流程" :disabled="!canManageGovernance" />
+            <el-input v-model="form.flowName" placeholder="例如 订单自动治理流程" :disabled="!canManageGovernance" />
           </el-form-item>
           <el-form-item label="执行名称">
             <el-input v-model="form.executionName" placeholder="留空则自动生成输出数据集名称" :disabled="!canExecuteGovernance" />
@@ -280,6 +332,18 @@ onMounted(async () => {
           :closable="false"
         />
         <el-alert
+          class="notice-box"
+          title="已支持订单去重、金额标准化、时间标准化、商品分类标准化、状态标准化算子。"
+          type="success"
+          :closable="false"
+        />
+        <el-alert
+          class="notice-box"
+          title="待增强：字段映射向导和算子参数可视化配置将在下一轮补齐。"
+          type="warning"
+          :closable="false"
+        />
+        <el-alert
           v-if="executionResult"
           class="notice-box"
           :title="executionResult.summary"
@@ -293,7 +357,7 @@ onMounted(async () => {
     <el-card shadow="never">
       <template #header>
         <div class="card-header">
-          <span>已保存治理流程</span>
+          <span>已保存电商治理流程</span>
           <el-button link type="primary" @click="loadData">刷新</el-button>
         </div>
       </template>

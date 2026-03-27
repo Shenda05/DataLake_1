@@ -43,6 +43,42 @@ public class QueryAnalysisController {
         return ApiResponse.success(queryAnalysisService.sql(new QueryAnalysisService.SqlQueryRequest(body.datasetId(), body.sql())), requestId(request));
     }
 
+    @PostMapping("/api/queries/ecommerce-metric")
+    public ApiResponse<?> ecommerceMetric(@Valid @RequestBody EcommerceMetricRequest body, HttpServletRequest request) {
+        return ApiResponse.success(
+            queryAnalysisService.ecommerceMetric(
+                new QueryAnalysisService.EcommerceMetricRequest(
+                    body.datasetId(),
+                    body.metricType(),
+                    body.timeField(),
+                    body.valueField(),
+                    body.categoryField(),
+                    body.productField(),
+                    body.quantityField(),
+                    body.stockThreshold()
+                )
+            ),
+            requestId(request)
+        );
+    }
+
+    @PostMapping("/api/queries/integration")
+    public ApiResponse<?> integration(@Valid @RequestBody IntegrationQueryRequest body, HttpServletRequest request) {
+        return ApiResponse.success(
+            queryAnalysisService.integration(
+                new QueryAnalysisService.IntegrationQueryRequest(
+                    body.leftDatasetId(),
+                    body.rightDatasetId(),
+                    body.mode(),
+                    body.leftField(),
+                    body.rightField(),
+                    body.limit()
+                )
+            ),
+            requestId(request)
+        );
+    }
+
     @PostMapping("/api/queries/filter/export")
     @PreAuthorize("hasAuthority('ACTION_query.export')")
     public ResponseEntity<byte[]> exportFilter(
@@ -99,6 +135,28 @@ public class QueryAnalysisController {
     public record SqlQueryRequest(
         @NotNull(message = "datasetId 不能为空") Long datasetId,
         @NotBlank(message = "sql 不能为空") String sql
+    ) {
+    }
+
+    public record EcommerceMetricRequest(
+        @NotNull(message = "datasetId 不能为空") Long datasetId,
+        @NotBlank(message = "metricType 不能为空") String metricType,
+        String timeField,
+        String valueField,
+        String categoryField,
+        String productField,
+        String quantityField,
+        Double stockThreshold
+    ) {
+    }
+
+    public record IntegrationQueryRequest(
+        @NotNull(message = "leftDatasetId 不能为空") Long leftDatasetId,
+        @NotNull(message = "rightDatasetId 不能为空") Long rightDatasetId,
+        @NotBlank(message = "mode 不能为空") String mode,
+        String leftField,
+        String rightField,
+        Integer limit
     ) {
     }
 }
