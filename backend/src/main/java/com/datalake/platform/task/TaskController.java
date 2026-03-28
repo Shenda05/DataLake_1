@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -87,6 +88,13 @@ public class TaskController {
     @PreAuthorize("hasAuthority('ACTION_task.manage')")
     public ApiResponse<?> resume(@PathVariable Long taskId, HttpServletRequest request) {
         return ApiResponse.success(taskService.resume(taskId), requestId(request));
+    }
+
+    @DeleteMapping("/{taskId}")
+    @PreAuthorize("hasAuthority('ACTION_task.manage')")
+    public ApiResponse<Void> delete(@PathVariable Long taskId, HttpServletRequest request) {
+        taskService.delete(taskId);
+        return ApiResponse.success(requestId(request));
     }
 
     private String requestId(HttpServletRequest request) {

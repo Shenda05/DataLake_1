@@ -164,30 +164,73 @@ public class QueryAnalysisService {
 
     // [已改造完成] 基础 Join/Union 集成能力（用户+订单/商品+订单/商品+库存）
     public IntegrationQueryResponse integration(IntegrationQueryRequest request) {
-        DatasetService.DatasetDetail leftDataset = datasetService.detail(request.leftDatasetId());
-        DatasetService.DatasetDetail rightDataset = datasetService.detail(request.rightDatasetId());
-        List<DatasetService.MetaFieldRecord> leftMeta = datasetService.metadata(request.leftDatasetId());
-        List<DatasetService.MetaFieldRecord> rightMeta = datasetService.metadata(request.rightDatasetId());
-        List<Map<String, Object>> leftRows = datasetTableService.fetchAll(leftDataset.physicalTableName(), leftMeta, null, null);
-        List<Map<String, Object>> rightRows = datasetTableService.fetchAll(rightDataset.physicalTableName(), rightMeta, null, null);
+        IntegrationComputation computation = computeIntegration(request);
+        return new IntegrationQueryResponse(
+            computation.mode(),
+            computation.columns(),
+            computation.merged().size(),
+            computation.limited()
+        );
+    }
 
-        int limit = request.limit() == null ? 200 : Math.max(1, Math.min(request.limit(), 1000));
-        String mode = request.mode() == null ? "JOIN" : request.mode().toUpperCase(Locale.ROOT);
-
-        List<Map<String, Object>> merged;
-        if ("JOIN".equals(mode)) {
-            String leftField = resolveDatasetField(leftMeta, request.leftField(), "leftField");
-            String rightField = resolveDatasetField(rightMeta, request.rightField(), "rightField");
-            merged = joinRows(leftRows, rightRows, leftField, rightField);
-        } else if ("UNION".equals(mode)) {
-            merged = unionRows(leftRows, rightRows);
-        } else {
-            throw new IllegalArgumentException("mode 仅支持 JOIN 或 UNION");
+    // [已改造完成] 集成结果保存为新数据集（按当前结果落库，受 limit 约束）
+    public IntegrationSaveResponse saveIntegrationResult(IntegrationSaveRequest request, Long userId) {
+        if (request.outputDatasetName() == null || request.outputDatasetName().isBlank()) {
+            throw new IllegalArgumentException("outputDatasetName 不能为空");
+        }
+        IntegrationComputation computation = computeIntegration(
+            new IntegrationQueryRequest(
+                request.leftDatasetId(),
+                request.rightDatasetId(),
+                request.mode(),
+                request.leftField(),
+                request.rightField(),
+                request.limit()
+            )
+        );
+        if (computation.columns().isEmpty()) {
+            throw new IllegalArgumentException("当前集成结果没有可保存字段，请调整集成条件后重试");
         }
 
-        List<Map<String, Object>> limited = merged.subList(0, Math.min(limit, merged.size()));
-        List<String> columns = limited.isEmpty() ? List.of() : new ArrayList<>(limited.get(0).keySet());
-        return new IntegrationQueryResponse(mode, columns, merged.size(), limited);
+        String outputDomain = request.outputBusinessDomain();
+        if (outputDomain == null || outputDomain.isBlank()) {
+            outputDomain = computation.leftDataset().businessDomain();
+        }
+        if (outputDomain == null || outputDomain.isBlank()) {
+            outputDomain = computation.rightDataset().businessDomain();
+        }
+        if (outputDomain == null || outputDomain.isBlank()) {
+            outputDomain = "TRADE";
+        }
+
+        Long outputSourceId = computation.leftDataset().sourceId() != null
+            ? computation.leftDataset().sourceId()
+            : computation.rightDataset().sourceId();
+        String mode = computation.mode();
+        String storagePath = "integration://left=" + computation.leftDataset().datasetId()
+            + "&right=" + computation.rightDataset().datasetId()
+            + "&mode=" + mode.toLowerCase(Locale.ROOT);
+        List<DatasetService.MetaFieldRecord> outputColumns = buildIntegrationColumns(computation.columns(), computation.limited());
+        DatasetService.CreatedDataset created = datasetService.createDatasetFromRows(
+            outputSourceId,
+            request.outputDatasetName().trim(),
+            outputDomain,
+            "INTEGRATION_" + mode,
+            storagePath,
+            "查询分析页集成结果保存数据集（当前结果快照）",
+            userId,
+            outputColumns,
+            computation.limited()
+        );
+
+        return new IntegrationSaveResponse(
+            created.datasetId(),
+            created.datasetName(),
+            created.businessDomain(),
+            created.recordCount(),
+            created.fieldCount(),
+            mode
+        );
     }
 
     private Map<String, String> buildFieldMap(List<DatasetService.MetaFieldRecord> metadata) {
@@ -332,10 +375,11 @@ public class QueryAnalysisService {
         return merged;
     }
 
-    private List<Map<String, Object>> unionRows(List<Map<String, Object>> leftRows, List<Map<String, Object>> rightRows) {
-        LinkedHashSet<String> columns = new LinkedHashSet<>();
-        leftRows.stream().findFirst().ifPresent(row -> columns.addAll(row.keySet()));
-        rightRows.stream().findFirst().ifPresent(row -> columns.addAll(row.keySet()));
+    private List<Map<String, Object>> unionRows(
+        List<Map<String, Object>> leftRows,
+        List<Map<String, Object>> rightRows,
+        LinkedHashSet<String> columns
+    ) {
         List<Map<String, Object>> merged = new ArrayList<>();
         for (Map<String, Object> row : leftRows) {
             merged.add(alignColumns(row, columns));
@@ -428,6 +472,136 @@ public class QueryAnalysisService {
         }
     }
 
+    private IntegrationComputation computeIntegration(IntegrationQueryRequest request) {
+        DatasetService.DatasetDetail leftDataset = datasetService.detail(request.leftDatasetId());
+        DatasetService.DatasetDetail rightDataset = datasetService.detail(request.rightDatasetId());
+        List<DatasetService.MetaFieldRecord> leftMeta = datasetService.metadata(request.leftDatasetId());
+        List<DatasetService.MetaFieldRecord> rightMeta = datasetService.metadata(request.rightDatasetId());
+        List<Map<String, Object>> leftRows = datasetTableService.fetchAll(leftDataset.physicalTableName(), leftMeta, null, null);
+        List<Map<String, Object>> rightRows = datasetTableService.fetchAll(rightDataset.physicalTableName(), rightMeta, null, null);
+
+        int limit = request.limit() == null ? 200 : Math.max(1, Math.min(request.limit(), 1000));
+        String mode = request.mode() == null ? "JOIN" : request.mode().toUpperCase(Locale.ROOT);
+
+        List<Map<String, Object>> merged;
+        List<String> columns;
+        if ("JOIN".equals(mode)) {
+            String leftField = resolveDatasetField(leftMeta, request.leftField(), "leftField");
+            String rightField = resolveDatasetField(rightMeta, request.rightField(), "rightField");
+            merged = joinRows(leftRows, rightRows, leftField, rightField);
+            columns = resolveJoinColumns(leftMeta, rightMeta);
+        } else if ("UNION".equals(mode)) {
+            LinkedHashSet<String> unionColumns = resolveUnionColumns(leftMeta, rightMeta, leftRows, rightRows);
+            merged = unionRows(leftRows, rightRows, unionColumns);
+            columns = new ArrayList<>(unionColumns);
+        } else {
+            throw new IllegalArgumentException("mode 仅支持 JOIN 或 UNION");
+        }
+
+        List<Map<String, Object>> limited = merged.subList(0, Math.min(limit, merged.size()));
+        if (columns.isEmpty() && !limited.isEmpty()) {
+            columns = new ArrayList<>(limited.get(0).keySet());
+        }
+        return new IntegrationComputation(mode, columns, merged, limited, leftDataset, rightDataset);
+    }
+
+    private List<String> resolveJoinColumns(
+        List<DatasetService.MetaFieldRecord> leftMeta,
+        List<DatasetService.MetaFieldRecord> rightMeta
+    ) {
+        LinkedHashSet<String> columns = new LinkedHashSet<>();
+        leftMeta.stream().map(DatasetService.MetaFieldRecord::fieldName).forEach(columns::add);
+        for (DatasetService.MetaFieldRecord rightField : rightMeta) {
+            String column = rightField.fieldName();
+            if (columns.contains(column)) {
+                column = "right_" + column;
+                while (columns.contains(column)) {
+                    column = "right_" + column;
+                }
+            }
+            columns.add(column);
+        }
+        return new ArrayList<>(columns);
+    }
+
+    private LinkedHashSet<String> resolveUnionColumns(
+        List<DatasetService.MetaFieldRecord> leftMeta,
+        List<DatasetService.MetaFieldRecord> rightMeta,
+        List<Map<String, Object>> leftRows,
+        List<Map<String, Object>> rightRows
+    ) {
+        LinkedHashSet<String> columns = new LinkedHashSet<>();
+        leftMeta.stream().map(DatasetService.MetaFieldRecord::fieldName).forEach(columns::add);
+        rightMeta.stream().map(DatasetService.MetaFieldRecord::fieldName).forEach(columns::add);
+        if (columns.isEmpty()) {
+            leftRows.stream().findFirst().ifPresent(row -> columns.addAll(row.keySet()));
+            rightRows.stream().findFirst().ifPresent(row -> columns.addAll(row.keySet()));
+        }
+        return columns;
+    }
+
+    private List<DatasetService.MetaFieldRecord> buildIntegrationColumns(List<String> columns, List<Map<String, Object>> rows) {
+        LinkedHashSet<String> usedPhysicalColumns = new LinkedHashSet<>();
+        List<DatasetService.MetaFieldRecord> result = new ArrayList<>();
+        for (int i = 0; i < columns.size(); i++) {
+            String fieldName = columns.get(i);
+            String physicalColumn = sanitizePhysicalColumn(fieldName, usedPhysicalColumns);
+            Object sample = sampleValue(rows, fieldName);
+            result.add(new DatasetService.MetaFieldRecord(
+                null,
+                null,
+                fieldName,
+                physicalColumn,
+                inferFieldType(sample),
+                true,
+                sample == null ? null : String.valueOf(sample),
+                i + 1
+            ));
+        }
+        return result;
+    }
+
+    private String sanitizePhysicalColumn(String fieldName, LinkedHashSet<String> usedPhysicalColumns) {
+        String sanitized = com.datalake.platform.common.util.SqlNameUtils.sanitizeColumnName(fieldName);
+        if (sanitized.isBlank()) {
+            sanitized = "field_col";
+        }
+        String candidate = sanitized;
+        int suffix = 1;
+        while (usedPhysicalColumns.contains(candidate)) {
+            suffix += 1;
+            candidate = sanitized + "_" + suffix;
+        }
+        usedPhysicalColumns.add(candidate);
+        return candidate;
+    }
+
+    private Object sampleValue(List<Map<String, Object>> rows, String fieldName) {
+        for (Map<String, Object> row : rows) {
+            Object value = row.get(fieldName);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String inferFieldType(Object sample) {
+        if (sample == null) {
+            return "STRING";
+        }
+        if (sample instanceof Byte || sample instanceof Short || sample instanceof Integer || sample instanceof Long) {
+            return "BIGINT";
+        }
+        if (sample instanceof Number) {
+            return "DOUBLE";
+        }
+        if (sample instanceof Boolean) {
+            return "BOOLEAN";
+        }
+        return "STRING";
+    }
+
     public record FilterCondition(String field, String operator, String value) {
     }
 
@@ -459,6 +633,18 @@ public class QueryAnalysisService {
     ) {
     }
 
+    public record IntegrationSaveRequest(
+        Long leftDatasetId,
+        Long rightDatasetId,
+        String mode,
+        String leftField,
+        String rightField,
+        Integer limit,
+        String outputDatasetName,
+        String outputBusinessDomain
+    ) {
+    }
+
     public record SummaryResponse(Long datasetId, long recordCount, long nullCount, long duplicateCount) {
     }
 
@@ -481,6 +667,26 @@ public class QueryAnalysisService {
         List<String> columns,
         int total,
         List<Map<String, Object>> records
+    ) {
+    }
+
+    public record IntegrationSaveResponse(
+        Long datasetId,
+        String datasetName,
+        String businessDomain,
+        int recordCount,
+        int fieldCount,
+        String mode
+    ) {
+    }
+
+    private record IntegrationComputation(
+        String mode,
+        List<String> columns,
+        List<Map<String, Object>> merged,
+        List<Map<String, Object>> limited,
+        DatasetService.DatasetDetail leftDataset,
+        DatasetService.DatasetDetail rightDataset
     ) {
     }
 }

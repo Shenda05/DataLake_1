@@ -26,6 +26,7 @@ public class DataBootstrapRunner implements ApplicationRunner {
         ensureRoleActionPermissionsColumn();
         ensureDatasetBusinessDomainColumn();
         ensureImportBusinessDomainColumn();
+        ensureTaskLogStructuredColumns();
         bootstrapRoles();
         bootstrapUsers();
         bootstrapOperators();
@@ -63,6 +64,20 @@ public class DataBootstrapRunner implements ApplicationRunner {
             jdbcTemplate.execute("alter table import_record add column business_domain varchar(32) default 'TRADE'");
         }
         jdbcTemplate.update("update import_record set business_domain = 'TRADE' where business_domain is null or trim(business_domain) = ''");
+    }
+
+    private void ensureTaskLogStructuredColumns() {
+        ensureColumnIfMissing("task_log", "input_params", "varchar(4000)");
+        ensureColumnIfMissing("task_log", "execution_steps", "varchar(4000)");
+        ensureColumnIfMissing("task_log", "failure_reason", "varchar(4000)");
+    }
+
+    private void ensureColumnIfMissing(String tableName, String columnName, String columnDefinition) {
+        try {
+            jdbcTemplate.queryForList("select " + columnName + " from " + tableName + " where 1 = 0");
+        } catch (DataAccessException ex) {
+            jdbcTemplate.execute("alter table " + tableName + " add column " + columnName + " " + columnDefinition);
+        }
     }
 
     private void bootstrapRoles() {

@@ -102,6 +102,9 @@ const failureReasons = computed(() => {
 });
 const canExportLogs = computed(() => authStore.hasAction('log.export'));
 const canReplayLogs = computed(() => authStore.hasAction('log.replay'));
+const selectedInputParamsText = computed(() => JSON.stringify(selectedLog.value?.inputParams || {}, null, 2));
+const selectedExecutionSteps = computed(() => selectedLog.value?.executionSteps || []);
+const selectedFailureReason = computed(() => selectedLog.value?.failureReason || null);
 
 restoreFilters();
 loadSavedViews();
@@ -155,6 +158,21 @@ function statusTagType(status: string) {
     case 'RUNNING':
       return 'warning';
     case 'PAUSED':
+      return 'info';
+    default:
+      return '';
+  }
+}
+
+function executionStepTagType(status: string) {
+  switch (status) {
+    case 'SUCCESS':
+      return 'success';
+    case 'FAILED':
+      return 'danger';
+    case 'RETRYING':
+      return 'warning';
+    case 'SKIPPED':
       return 'info';
     default:
       return '';
@@ -729,6 +747,68 @@ onMounted(async () => {
           type="success"
           :closable="false"
         />
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-header">
+              <span>输入参数</span>
+              <el-tag type="info">{{ Object.keys(selectedLog.inputParams || {}).length }} 项</el-tag>
+            </div>
+          </template>
+          <pre v-if="Object.keys(selectedLog.inputParams || {}).length">{{ selectedInputParamsText }}</pre>
+          <el-alert
+            v-else
+            class="notice-box"
+            title="暂无结构化输入参数（历史日志）"
+            type="info"
+            :closable="false"
+          />
+        </el-card>
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-header">
+              <span>执行步骤</span>
+              <el-tag>{{ selectedExecutionSteps.length }} 步</el-tag>
+            </div>
+          </template>
+          <el-table v-if="selectedExecutionSteps.length" :data="selectedExecutionSteps" stripe>
+            <el-table-column prop="stepIndex" label="步骤" width="90" />
+            <el-table-column prop="stepName" label="阶段/算子" width="220" />
+            <el-table-column label="状态" width="120">
+              <template #default="{ row }">
+                <el-tag :type="executionStepTagType(row.status)">{{ row.status }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="detail" label="说明" />
+          </el-table>
+          <el-alert
+            v-else
+            class="notice-box"
+            title="暂无结构化执行步骤（历史日志）"
+            type="info"
+            :closable="false"
+          />
+        </el-card>
+        <el-card shadow="never">
+          <template #header>
+            <div class="card-header">
+              <span>结构化失败原因</span>
+              <el-tag :type="selectedFailureReason ? 'danger' : 'info'">{{ selectedFailureReason ? '已记录' : '暂无' }}</el-tag>
+            </div>
+          </template>
+          <el-descriptions v-if="selectedFailureReason" :column="1" border>
+            <el-descriptions-item label="错误码">{{ selectedFailureReason.code || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="失败步骤">{{ selectedFailureReason.step || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="失败原因">{{ selectedFailureReason.reason || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="原始信息">{{ selectedFailureReason.rawMessage || '-' }}</el-descriptions-item>
+          </el-descriptions>
+          <el-alert
+            v-else
+            class="notice-box"
+            title="当前日志未记录结构化失败原因（成功日志或历史日志）"
+            type="info"
+            :closable="false"
+          />
+        </el-card>
         <div class="detail-actions">
           <el-button v-if="hasMenu('tasks')" type="primary" @click="goToTasks(selectedLog)">去任务调度继续观察</el-button>
           <el-button

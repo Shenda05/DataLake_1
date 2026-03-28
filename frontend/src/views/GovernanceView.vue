@@ -9,6 +9,7 @@ import {
   listGovernanceFlows,
   listGovernanceOperators,
   type DatasetSummary,
+  type GovernanceExecutionResult,
   type GovernanceFlow,
   type GovernanceOperator
 } from '../api/platform';
@@ -22,7 +23,8 @@ type EditableStep = {
 const datasets = ref<DatasetSummary[]>([]);
 const operators = ref<GovernanceOperator[]>([]);
 const flows = ref<GovernanceFlow[]>([]);
-const executionResult = ref<{ outputDatasetName: string; summary: string; logRef: number } | null>(null);
+const executionResult = ref<GovernanceExecutionResult | null>(null);
+const executionFailure = ref('');
 const loading = ref(false);
 const editingFlowId = ref<number | null>(null);
 const form = reactive({
@@ -197,14 +199,13 @@ async function executeFlow() {
       operatorChain: buildOperatorChain(),
       executionName: form.executionName || form.flowName || undefined
     });
-    executionResult.value = {
-      outputDatasetName: result.outputDatasetName,
-      summary: result.summary,
-      logRef: result.logRef
-    };
+    executionResult.value = result;
+    executionFailure.value = '';
     ElMessage.success(`治理完成，输出数据集 ${result.outputDatasetName}`);
     await loadData();
   } catch (error) {
+    executionResult.value = null;
+    executionFailure.value = (error as Error).message;
     ElMessage.error(`执行治理失败: ${(error as Error).message}`);
   } finally {
     loading.value = false;
@@ -347,8 +348,16 @@ onMounted(async () => {
           v-if="executionResult"
           class="notice-box"
           :title="executionResult.summary"
-          :description="`输出数据集：${executionResult.outputDatasetName}，日志编号：${executionResult.logRef}`"
+          :description="`输出数据集：${executionResult.outputDatasetName}，治理前记录数：${executionResult.inputRecordCount}，治理后记录数：${executionResult.outputRecordCount}，异常处理条数：${executionResult.abnormalHandledCount}，日志编号：${executionResult.logRef}`"
           type="success"
+          :closable="false"
+        />
+        <el-alert
+          v-if="executionFailure"
+          class="notice-box"
+          title="治理执行失败"
+          :description="executionFailure"
+          type="error"
           :closable="false"
         />
       </el-card>

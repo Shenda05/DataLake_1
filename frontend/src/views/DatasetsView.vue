@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { useRoute } from 'vue-router';
 import { isAuthExpiredError } from '../api/client';
 import {
   deleteDataset,
@@ -17,6 +18,7 @@ import {
 import { useAuthStore } from '../stores/auth';
 
 const authStore = useAuthStore();
+const route = useRoute();
 const datasets = ref<DatasetSummary[]>([]);
 const domainFilter = ref('');
 const metadata = ref<MetaField[]>([]);
@@ -39,8 +41,10 @@ const filteredDatasets = computed(() =>
 
 async function loadDatasets() {
   datasets.value = await listDatasets();
-  const first = filteredDatasets.value[0] || datasets.value[0];
-  if (first) {
+  const preferredDatasetId = readRouteDatasetId();
+  const preferred = preferredDatasetId ? datasets.value.find((item) => item.datasetId === preferredDatasetId) : null;
+  const first = preferred || filteredDatasets.value[0] || datasets.value[0];
+  if (first && selectedDataset.value?.datasetId !== first.datasetId) {
     await selectDataset(first.datasetId);
   }
 }
@@ -66,6 +70,13 @@ async function loadPreview(pageNum = 1) {
 
 function handleRowClick(row: DatasetSummary) {
   void selectDataset(row.datasetId);
+}
+
+function readRouteDatasetId() {
+  const raw = route.query.datasetId;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function handlePageChange(page: number) {
@@ -145,6 +156,19 @@ watch(
       if (next) {
         void selectDataset(next.datasetId);
       }
+    }
+  }
+);
+
+watch(
+  () => route.query.datasetId,
+  () => {
+    const datasetId = readRouteDatasetId();
+    if (!datasetId || selectedDataset.value?.datasetId === datasetId) {
+      return;
+    }
+    if (datasets.value.some((item) => item.datasetId === datasetId)) {
+      void selectDataset(datasetId);
     }
   }
 );

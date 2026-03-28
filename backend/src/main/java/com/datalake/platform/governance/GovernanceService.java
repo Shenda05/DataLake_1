@@ -123,8 +123,22 @@ public class GovernanceService {
         List<Map<String, Object>> rows = deepCopy(datasetTableService.fetchAll(inputDataset.physicalTableName(), metadata, null, null));
 
         List<Map<String, Object>> currentRows = rows;
-        for (OperatorStep step : operatorChain) {
-            currentRows = applyStep(metadata, currentRows, step);
+        long abnormalHandledCount = 0L;
+        for (int index = 0; index < operatorChain.size(); index++) {
+            OperatorStep step = operatorChain.get(index);
+            try {
+                StepApplyResult stepResult = applyStep(metadata, currentRows, step);
+                currentRows = stepResult.rows();
+                abnormalHandledCount += Math.max(0L, stepResult.handledCount());
+            } catch (Exception exception) {
+                throw new GovernanceExecutionException(
+                    new FailureStep(index + 1, step.operatorKey(), exception.getMessage()),
+                    rows.size(),
+                    currentRows.size(),
+                    abnormalHandledCount,
+                    exception
+                );
+            }
         }
 
         String outputDatasetName = buildOutputDatasetName(inputDataset.datasetName(), executionName);
@@ -144,6 +158,9 @@ public class GovernanceService {
             createdDataset.datasetId(),
             createdDataset.datasetName(),
             operatorChain.size(),
+            rows.size(),
+            createdDataset.recordCount(),
+            abnormalHandledCount,
             "治理完成，已生成新数据集 " + createdDataset.datasetName() + "，记录数 " + createdDataset.recordCount()
         );
     }
@@ -201,7 +218,7 @@ public class GovernanceService {
         }
     }
 
-    private List<Map<String, Object>> applyStep(
+    private StepApplyResult applyStep(
         List<DatasetService.MetaFieldRecord> metadata,
         List<Map<String, Object>> rows,
         OperatorStep step
@@ -220,20 +237,22 @@ public class GovernanceService {
         };
     }
 
-    private List<Map<String, Object>> nullFill(List<Map<String, Object>> rows, String field, String fillValue) {
+    private StepApplyResult nullFill(List<Map<String, Object>> rows, String field, String fillValue) {
         List<Map<String, Object>> result = new ArrayList<>();
+        long handledCount = 0L;
         for (Map<String, Object> row : rows) {
             Map<String, Object> copied = new LinkedHashMap<>(row);
             Object value = copied.get(field);
             if (value == null || String.valueOf(value).isBlank()) {
                 copied.put(field, fillValue);
+                handledCount += 1;
             }
             result.add(copied);
         }
-        return result;
+        return new StepApplyResult(result, handledCount);
     }
 
-    private List<Map<String, Object>> deduplicate(List<Map<String, Object>> rows, List<String> fields) {
+    private StepApplyResult deduplicate(List<Map<String, Object>> rows, List<String> fields) {
         if (fields.isEmpty()) {
             throw new IllegalArgumentException("去重算子至少需要一个字段");
         }
@@ -242,10 +261,11 @@ public class GovernanceService {
             String key = fields.stream().map(field -> String.valueOf(row.get(field))).collect(Collectors.joining("|"));
             unique.putIfAbsent(key, new LinkedHashMap<>(row));
         }
-        return new ArrayList<>(unique.values());
+        List<Map<String, Object>> result = new ArrayList<>(unique.values());
+        return new StepApplyResult(result, Math.max(0, rows.size() - result.size()));
     }
 
-    private List<Map<String, Object>> orderDedup(List<Map<String, Object>> rows, Map<String, Object> params) {
+    private StepApplyResult orderDedup(List<Map<String, Object>> rows, Map<String, Object> params) {
         List<String> fields = parseFields(params);
         if (fields.isEmpty()) {
             for (String candidate : List.of("order_id", "order_no", "id")) {
@@ -258,7 +278,7 @@ public class GovernanceService {
         return deduplicate(rows, fields);
     }
 
-    private List<Map<String, Object>> fieldConvert(
+    private StepApplyResult fieldConvert(
         List<DatasetService.MetaFieldRecord> metadata,
         List<Map<String, Object>> rows,
         String field,
@@ -266,6 +286,7 @@ public class GovernanceService {
     ) {
         updateFieldType(metadata, field, transform);
         List<Map<String, Object>> result = new ArrayList<>();
+        long handledCount = 0L;
         for (Map<String, Object> row : rows) {
             Map<String, Object> copied = new LinkedHashMap<>(row);
             Object value = copied.get(field);
@@ -281,66 +302,90 @@ public class GovernanceService {
                 case "NUMBER" -> parseNumber(text);
                 default -> text.trim();
             };
+            if (!Objects.equals(value, converted)) {
+                handledCount += 1;
+            }
             copied.put(field, converted);
             result.add(copied);
         }
-        return result;
+        return new StepApplyResult(result, handledCount);
     }
 
-    private List<Map<String, Object>> amountNormalize(
+    private StepApplyResult amountNormalize(
         List<DatasetService.MetaFieldRecord> metadata,
         List<Map<String, Object>> rows,
         String field
     ) {
         updateFieldType(metadata, field, "NUMBER");
         List<Map<String, Object>> result = new ArrayList<>();
+        long handledCount = 0L;
         for (Map<String, Object> row : rows) {
             Map<String, Object> copied = new LinkedHashMap<>(row);
-            copied.put(field, normalizeAmountValue(row.get(field)));
+            Object normalized = normalizeAmountValue(row.get(field));
+            if (!Objects.equals(row.get(field), normalized)) {
+                handledCount += 1;
+            }
+            copied.put(field, normalized);
             result.add(copied);
         }
-        return result;
+        return new StepApplyResult(result, handledCount);
     }
 
-    private List<Map<String, Object>> timeNormalize(List<Map<String, Object>> rows, String field) {
+    private StepApplyResult timeNormalize(List<Map<String, Object>> rows, String field) {
         List<Map<String, Object>> result = new ArrayList<>();
+        long handledCount = 0L;
         for (Map<String, Object> row : rows) {
             Map<String, Object> copied = new LinkedHashMap<>(row);
             Object value = row.get(field);
-            copied.put(field, normalizeTimeValue(value));
+            Object normalized = normalizeTimeValue(value);
+            if (!Objects.equals(value, normalized)) {
+                handledCount += 1;
+            }
+            copied.put(field, normalized);
             result.add(copied);
         }
-        return result;
+        return new StepApplyResult(result, handledCount);
     }
 
-    private List<Map<String, Object>> categoryNormalize(List<Map<String, Object>> rows, String field) {
+    private StepApplyResult categoryNormalize(List<Map<String, Object>> rows, String field) {
         List<Map<String, Object>> result = new ArrayList<>();
+        long handledCount = 0L;
         for (Map<String, Object> row : rows) {
             Map<String, Object> copied = new LinkedHashMap<>(row);
             Object value = row.get(field);
-            copied.put(field, normalizeCategoryValue(value));
+            Object normalized = normalizeCategoryValue(value);
+            if (!Objects.equals(value, normalized)) {
+                handledCount += 1;
+            }
+            copied.put(field, normalized);
             result.add(copied);
         }
-        return result;
+        return new StepApplyResult(result, handledCount);
     }
 
-    private List<Map<String, Object>> statusNormalize(List<Map<String, Object>> rows, String field) {
+    private StepApplyResult statusNormalize(List<Map<String, Object>> rows, String field) {
         List<Map<String, Object>> result = new ArrayList<>();
+        long handledCount = 0L;
         for (Map<String, Object> row : rows) {
             Map<String, Object> copied = new LinkedHashMap<>(row);
             Object value = row.get(field);
-            copied.put(field, normalizeStatusValue(value));
+            Object normalized = normalizeStatusValue(value);
+            if (!Objects.equals(value, normalized)) {
+                handledCount += 1;
+            }
+            copied.put(field, normalized);
             result.add(copied);
         }
-        return result;
+        return new StepApplyResult(result, handledCount);
     }
 
-    private List<Map<String, Object>> filterKeep(List<Map<String, Object>> rows, String field, String operator, String value) {
+    private StepApplyResult filterKeep(List<Map<String, Object>> rows, String field, String operator, String value) {
         String normalizedOperator = operator == null ? "LIKE" : operator.toUpperCase(Locale.ROOT);
-        return rows.stream()
+        List<Map<String, Object>> result = rows.stream()
             .filter(row -> matches(row.get(field), normalizedOperator, value))
             .map(row -> (Map<String, Object>) new LinkedHashMap<>(row))
             .collect(Collectors.toCollection(ArrayList::new));
+        return new StepApplyResult(result, Math.max(0, rows.size() - result.size()));
     }
 
     private boolean matches(Object currentValue, String operator, String expectedValue) {
@@ -600,7 +645,61 @@ public class GovernanceService {
         Long outputDatasetId,
         String outputDatasetName,
         int operatorCount,
+        long inputRecordCount,
+        long outputRecordCount,
+        long abnormalHandledCount,
         String summary
     ) {
+    }
+
+    public record FailureStep(Integer stepIndex, String operatorKey, String reason) {
+    }
+
+    private record StepApplyResult(List<Map<String, Object>> rows, long handledCount) {
+    }
+
+    public static class GovernanceExecutionException extends IllegalArgumentException {
+
+        private final FailureStep failureStep;
+        private final long inputRecordCount;
+        private final long outputRecordCount;
+        private final long abnormalHandledCount;
+
+        public GovernanceExecutionException(
+            FailureStep failureStep,
+            long inputRecordCount,
+            long outputRecordCount,
+            long abnormalHandledCount,
+            Throwable cause
+        ) {
+            super(formatMessage(failureStep), cause);
+            this.failureStep = failureStep;
+            this.inputRecordCount = inputRecordCount;
+            this.outputRecordCount = outputRecordCount;
+            this.abnormalHandledCount = abnormalHandledCount;
+        }
+
+        public FailureStep failureStep() {
+            return failureStep;
+        }
+
+        public long inputRecordCount() {
+            return inputRecordCount;
+        }
+
+        public long outputRecordCount() {
+            return outputRecordCount;
+        }
+
+        public long abnormalHandledCount() {
+            return abnormalHandledCount;
+        }
+
+        private static String formatMessage(FailureStep step) {
+            if (step == null) {
+                return "治理流程执行失败";
+            }
+            return "治理流程第 " + step.stepIndex() + " 步(" + step.operatorKey() + ")执行失败: " + step.reason();
+        }
     }
 }

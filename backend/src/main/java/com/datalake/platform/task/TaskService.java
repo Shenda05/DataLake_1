@@ -2,6 +2,9 @@ package com.datalake.platform.task;
 
 import com.datalake.platform.datasource.DataImportService;
 import com.datalake.platform.governance.GovernanceService;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
@@ -139,11 +142,22 @@ public class TaskService {
     }
 
     @Transactional
+    public void delete(Long taskId) {
+        TaskRecord task = loadTask(taskId);
+        if ("RUNNING".equalsIgnoreCase(task.status()) || runningTasks.contains(taskId)) {
+            throw new IllegalArgumentException("任务正在运行，暂不支持删除");
+        }
+        Integer logCount = jdbcTemplate.queryForObject("select count(*) from task_log where task_id = ?", Integer.class, taskId);
+        if (logCount != null && logCount > 0) {
+            throw new IllegalArgumentException("任务已有执行日志，禁止删除");
+        }
+        jdbcTemplate.update("delete from task_def where task_id = ?", taskId);
+    }
+
     public TaskActionResponse trigger(Long taskId, Long userId) {
         return executeTask(taskId, userId, true);
     }
 
-    @Transactional
     public TaskActionResponse replayFromLog(Long logId, Long userId) {
         TaskLogService.TaskLogDetail log = taskLogService.detail(logId);
         if (log.taskId() == null) {
@@ -152,7 +166,6 @@ public class TaskService {
         return executeTask(log.taskId(), userId, true);
     }
 
-    @Transactional
     public void executeDueTasks() {
         List<Long> dueTaskIds = jdbcTemplate.query(
             "select task_id from task_def where status = 'ENABLED' and next_run_time is not null and next_run_time <= ? order by next_run_time asc",
@@ -186,6 +199,7 @@ public class TaskService {
 
     private TaskActionResponse executeTask(Long taskId, Long userId, boolean manualTrigger) {
         TaskRecord task = loadTask(taskId);
+        Map<String, Object> inputParams = buildInputParams(task, manualTrigger);
         if (!runningTasks.add(taskId)) {
             return new TaskActionResponse(taskId, "RUNNING", null, "任务正在执行，请稍后重试", toText(task.nextRunTime()));
         }
@@ -201,6 +215,8 @@ public class TaskService {
         try {
             int attempts = Math.max(1, task.retryPolicy());
             Exception lastException = null;
+            List<TaskLogService.ExecutionStep> failureSteps = List.of();
+            TaskLogService.FailureReason failureReason = null;
             for (int attempt = 1; attempt <= attempts; attempt++) {
                 try {
                     ExecutionOutcome outcome = runTask(task, userId);
@@ -214,7 +230,10 @@ public class TaskService {
                         "SUCCESS",
                         outcome.summary() + "；执行次数 " + attempt,
                         null,
-                        userId
+                        userId,
+                        inputParams,
+                        buildSuccessSteps(task, outcome, attempt),
+                        null
                     );
                     String resetStatus = "PAUSED".equalsIgnoreCase(originalStatus) && manualTrigger ? "PAUSED" : "ENABLED";
                     Timestamp nextRunTime = "ENABLED".equals(resetStatus) ? nextRunTime(task.cronExpr(), LocalDateTime.now()) : null;
@@ -229,6 +248,8 @@ public class TaskService {
                     return new TaskActionResponse(task.taskId(), "SUCCESS", logId, outcome.summary(), toText(nextRunTime));
                 } catch (Exception exception) {
                     lastException = exception;
+                    failureSteps = buildFailureSteps(task, exception, attempt, attempts);
+                    failureReason = buildFailureReason(exception);
                 }
             }
             Instant end = Instant.now();
@@ -241,7 +262,10 @@ public class TaskService {
                 "FAILED",
                 "任务执行失败",
                 lastException == null ? "未知错误" : lastException.getMessage(),
-                userId
+                userId,
+                inputParams,
+                failureSteps,
+                failureReason
             );
             String resetStatus = "PAUSED".equalsIgnoreCase(originalStatus) && manualTrigger ? "PAUSED" : "ENABLED";
             Timestamp nextRunTime = "ENABLED".equals(resetStatus) ? nextRunTime(task.cronExpr(), LocalDateTime.now()) : null;
@@ -263,15 +287,105 @@ public class TaskService {
         // [旧通用版共用] 保留 IMPORT/GOVERNANCE 调度与重试引擎，电商任务通过模板命名映射到该骨架。
         return switch (task.taskType().toUpperCase(Locale.ROOT)) {
             case "IMPORT" -> {
-                DataImportService.ImportResult result = dataImportService.rerunImport(task.targetId(), userId, task.taskName());
-                yield new ExecutionOutcome("导入完成，生成数据集 " + result.datasetName() + "，记录数 " + result.recordCount());
+                try {
+                    DataImportService.ImportResult result = dataImportService.rerunImport(task.targetId(), userId, task.taskName());
+                    yield new ExecutionOutcome(
+                        "导入完成，生成数据集 " + result.datasetName() + "，记录数 " + result.recordCount(),
+                        "EXECUTE_IMPORT",
+                        "导入记录 " + result.importId() + " 重新执行成功"
+                    );
+                } catch (Exception exception) {
+                    throw new TaskExecutionException(
+                        "IMPORT_EXECUTION_FAILED",
+                        "EXECUTE_IMPORT",
+                        exception.getMessage(),
+                        exception
+                    );
+                }
             }
             case "GOVERNANCE" -> {
-                GovernanceService.ExecutionResult result = governanceService.executeSavedFlow(task.targetId(), userId, task.taskName());
-                yield new ExecutionOutcome(result.summary());
+                try {
+                    GovernanceService.ExecutionResult result = governanceService.executeSavedFlow(task.targetId(), userId, task.taskName());
+                    yield new ExecutionOutcome(
+                        result.summary(),
+                        "EXECUTE_GOVERNANCE",
+                        "治理输入 " + result.inputRecordCount() + " 条，输出 " + result.outputRecordCount() + " 条，异常处理 " + result.abnormalHandledCount() + " 条"
+                    );
+                } catch (GovernanceService.GovernanceExecutionException exception) {
+                    GovernanceService.FailureStep failureStep = exception.failureStep();
+                    String step = failureStep == null
+                        ? "EXECUTE_GOVERNANCE"
+                        : "EXECUTE_GOVERNANCE:step-" + failureStep.stepIndex() + ":" + failureStep.operatorKey();
+                    throw new TaskExecutionException(
+                        "GOVERNANCE_EXECUTION_FAILED",
+                        step,
+                        exception.getMessage(),
+                        exception
+                    );
+                } catch (Exception exception) {
+                    throw new TaskExecutionException(
+                        "GOVERNANCE_EXECUTION_FAILED",
+                        "EXECUTE_GOVERNANCE",
+                        exception.getMessage(),
+                        exception
+                    );
+                }
             }
             default -> throw new IllegalArgumentException("当前版本仅支持 IMPORT 和 GOVERNANCE 任务");
         };
+    }
+
+    private Map<String, Object> buildInputParams(TaskRecord task, boolean manualTrigger) {
+        LinkedHashMap<String, Object> params = new LinkedHashMap<>();
+        params.put("taskId", task.taskId());
+        params.put("taskType", task.taskType());
+        params.put("targetId", task.targetId());
+        params.put("targetName", resolveTargetName(task.taskType(), task.targetId()));
+        params.put("cronExpr", task.cronExpr());
+        params.put("retryPolicy", task.retryPolicy());
+        params.put("triggerMode", manualTrigger ? "MANUAL" : "SCHEDULED");
+        return params;
+    }
+
+    private List<TaskLogService.ExecutionStep> buildSuccessSteps(TaskRecord task, ExecutionOutcome outcome, int attempt) {
+        List<TaskLogService.ExecutionStep> steps = new ArrayList<>();
+        steps.add(new TaskLogService.ExecutionStep(1, "LOAD_TARGET", "SUCCESS", "加载目标成功: " + task.targetId()));
+        steps.add(new TaskLogService.ExecutionStep(2, outcome.executionStage(), "SUCCESS", outcome.executionDetail()));
+        steps.add(new TaskLogService.ExecutionStep(3, "FINALIZE", "SUCCESS", "状态写回完成，执行次数 " + attempt));
+        return steps;
+    }
+
+    private List<TaskLogService.ExecutionStep> buildFailureSteps(TaskRecord task, Exception exception, int attempt, int maxAttempts) {
+        String failedStep = "EXECUTE_TASK";
+        String detail = exception.getMessage();
+        if (exception instanceof TaskExecutionException taskExecutionException) {
+            failedStep = taskExecutionException.step();
+            detail = taskExecutionException.getMessage();
+        }
+        List<TaskLogService.ExecutionStep> steps = new ArrayList<>();
+        steps.add(new TaskLogService.ExecutionStep(1, "LOAD_TARGET", "SUCCESS", "加载目标成功: " + task.targetId()));
+        steps.add(new TaskLogService.ExecutionStep(2, failedStep, "FAILED", detail));
+        String finalizeStatus = attempt < maxAttempts ? "RETRYING" : "SKIPPED";
+        String finalizeDetail = attempt < maxAttempts ? "准备第 " + (attempt + 1) + " 次重试" : "执行失败，未完成状态回写收尾";
+        steps.add(new TaskLogService.ExecutionStep(3, "FINALIZE", finalizeStatus, finalizeDetail));
+        return steps;
+    }
+
+    private TaskLogService.FailureReason buildFailureReason(Exception exception) {
+        if (exception instanceof TaskExecutionException taskExecutionException) {
+            return new TaskLogService.FailureReason(
+                taskExecutionException.code(),
+                taskExecutionException.step(),
+                taskExecutionException.getMessage(),
+                taskExecutionException.rawMessage()
+            );
+        }
+        return new TaskLogService.FailureReason(
+            "TASK_EXECUTION_FAILED",
+            "UNKNOWN",
+            exception.getMessage(),
+            exception.toString()
+        );
     }
 
     private void validateTask(String taskType, Long targetId, String cronExpr) {
@@ -416,6 +530,32 @@ public class TaskService {
     ) {
     }
 
-    private record ExecutionOutcome(String summary) {
+    private record ExecutionOutcome(String summary, String executionStage, String executionDetail) {
+    }
+
+    private static class TaskExecutionException extends RuntimeException {
+
+        private final String code;
+        private final String step;
+        private final String rawMessage;
+
+        private TaskExecutionException(String code, String step, String message, Throwable cause) {
+            super(message, cause);
+            this.code = code;
+            this.step = step;
+            this.rawMessage = cause == null ? message : cause.toString();
+        }
+
+        public String code() {
+            return code;
+        }
+
+        public String step() {
+            return step;
+        }
+
+        public String rawMessage() {
+            return rawMessage;
+        }
     }
 }

@@ -59,14 +59,14 @@ export const dataSources = [
 ];
 
 export const datasets = [
-  { datasetId: 2001, datasetName: '订单明细数据', businessDomain: 'TRADE', formatType: 'CSV', recordCount: 1280, fieldCount: 12, status: 'READY', creator: 'admin' },
-  { datasetId: 2002, datasetName: '库存快照数据', businessDomain: 'INVENTORY', formatType: 'JSON', recordCount: 640, fieldCount: 8, status: 'READY', creator: 'operator' }
+  { datasetId: 2001, datasetName: '订单明细数据', businessDomain: 'TRADE', formatType: 'CSV', recordCount: 1280, fieldCount: 12, status: 'READY', creator: 1, physicalTableName: 'dl_dataset_2001' },
+  { datasetId: 2002, datasetName: '库存快照数据', businessDomain: 'INVENTORY', formatType: 'JSON', recordCount: 640, fieldCount: 8, status: 'READY', creator: 2, physicalTableName: 'dl_dataset_2002' }
 ];
 
 export const metadata = [
-  { fieldName: 'order_id', fieldType: 'STRING', nullable: false, fieldDesc: '订单编号', sampleValue: 'ORD-20260327001' },
-  { fieldName: 'product_id', fieldType: 'STRING', nullable: false, fieldDesc: '商品编号', sampleValue: 'SKU-1001' },
-  { fieldName: 'amount', fieldType: 'DOUBLE', nullable: true, fieldDesc: '订单金额', sampleValue: '129.90' }
+  { fieldId: 1, datasetId: 2001, fieldName: 'order_id', physicalColumnName: 'order_id', fieldType: 'STRING', nullable: false, sampleValue: 'ORD-20260327001', fieldOrder: 1 },
+  { fieldId: 2, datasetId: 2001, fieldName: 'product_id', physicalColumnName: 'product_id', fieldType: 'STRING', nullable: false, sampleValue: 'SKU-1001', fieldOrder: 2 },
+  { fieldId: 3, datasetId: 2001, fieldName: 'amount', physicalColumnName: 'amount', fieldType: 'DOUBLE', nullable: true, sampleValue: '129.90', fieldOrder: 3 }
 ];
 
 export const recentTasks = [
@@ -75,8 +75,38 @@ export const recentTasks = [
 ];
 
 export const taskLogs = [
-  { logId: 4001, taskName: '每日订单导入任务', status: 'SUCCESS', startTime: '2026-03-27 02:00', endTime: '2026-03-27 02:03', duration: 180, message: '导入 1280 条，0 条失败' },
-  { logId: 4002, taskName: '订单自动治理任务', status: 'FAILED', startTime: '2026-03-27 02:30', endTime: '2026-03-27 02:31', duration: 60, message: '字段 order_time 时间格式不符合要求' }
+  {
+    logId: 4001,
+    taskId: 3001,
+    taskName: '每日订单导入任务',
+    taskType: 'IMPORT',
+    targetId: 5001,
+    status: 'SUCCESS',
+    startTime: '2026-03-27 02:00',
+    endTime: '2026-03-27 02:03',
+    duration: 180,
+    executionSummary: '导入 1280 条，0 条失败',
+    errorMessage: ''
+  },
+  {
+    logId: 4002,
+    taskId: 3002,
+    taskName: '订单自动治理任务',
+    taskType: 'GOVERNANCE',
+    targetId: 7001,
+    status: 'FAILED',
+    startTime: '2026-03-27 02:30',
+    endTime: '2026-03-27 02:31',
+    duration: 60,
+    executionSummary: '治理执行失败',
+    errorMessage: '字段 order_time 时间格式不符合要求',
+    failureReason: {
+      code: 'GOVERNANCE_OPERATOR_FAILED',
+      step: 'step-2:TIME_NORMALIZE',
+      reason: '字段 order_time 时间格式不符合要求',
+      rawMessage: '治理流程第 2 步(TIME_NORMALIZE)执行失败: 字段 order_time 时间格式不符合要求'
+    }
+  }
 ];
 
 export const governanceOperators = [

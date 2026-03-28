@@ -1,5 +1,6 @@
 package com.datalake.platform.dataset;
 
+import com.datalake.platform.common.security.SecurityUtils;
 import com.datalake.platform.common.web.ApiResponse;
 import com.datalake.platform.common.web.RequestIdFilter;
 import jakarta.servlet.http.HttpServletRequest;
@@ -74,6 +75,26 @@ public class QueryAnalysisController {
                     body.rightField(),
                     body.limit()
                 )
+            ),
+            requestId(request)
+        );
+    }
+
+    @PostMapping("/api/queries/integration/save")
+    public ApiResponse<?> saveIntegration(@Valid @RequestBody IntegrationSaveRequest body, HttpServletRequest request) {
+        return ApiResponse.success(
+            queryAnalysisService.saveIntegrationResult(
+                new QueryAnalysisService.IntegrationSaveRequest(
+                    body.leftDatasetId(),
+                    body.rightDatasetId(),
+                    body.mode(),
+                    body.leftField(),
+                    body.rightField(),
+                    body.limit(),
+                    body.outputDatasetName(),
+                    body.outputBusinessDomain()
+                ),
+                SecurityUtils.currentUser().userId()
             ),
             requestId(request)
         );
@@ -157,6 +178,18 @@ public class QueryAnalysisController {
         String leftField,
         String rightField,
         Integer limit
+    ) {
+    }
+
+    public record IntegrationSaveRequest(
+        @NotNull(message = "leftDatasetId 不能为空") Long leftDatasetId,
+        @NotNull(message = "rightDatasetId 不能为空") Long rightDatasetId,
+        @NotBlank(message = "mode 不能为空") String mode,
+        String leftField,
+        String rightField,
+        Integer limit,
+        @NotBlank(message = "outputDatasetName 不能为空") String outputDatasetName,
+        String outputBusinessDomain
     ) {
     }
 }

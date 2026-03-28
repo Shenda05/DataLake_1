@@ -42,6 +42,21 @@ export type ImportHistory = {
   createTime: string;
 };
 
+export type ImportDetail = {
+  importId: number;
+  sourceId?: number | null;
+  datasetName: string;
+  businessDomain: BusinessDomain;
+  formatType: string;
+  originalFileName?: string | null;
+  filePath?: string | null;
+  status: string;
+  recordCount: number;
+  errorMessage?: string | null;
+  createUser?: number | null;
+  createTime: string;
+};
+
 export type DatabaseTableOption = {
   schemaName: string;
   tableName: string;
@@ -119,6 +134,15 @@ export type IntegrationResponse = {
   records: Record<string, unknown>[];
 };
 
+export type IntegrationSaveResponse = {
+  datasetId: number;
+  datasetName: string;
+  businessDomain: BusinessDomain;
+  recordCount: number;
+  fieldCount: number;
+  mode: 'JOIN' | 'UNION' | string;
+};
+
 export type EcommerceOverviewResponse = {
   orderTrend: { day: string; value: number }[];
   salesTrend: { day: string; value: number }[];
@@ -159,6 +183,11 @@ export type GovernanceExecutionResult = {
   outputDatasetId: number;
   outputDatasetName: string;
   operatorCount: number;
+  inputRecordCount: number;
+  outputRecordCount: number;
+  abnormalHandledCount: number;
+  failedStep?: string;
+  failedReason?: string;
   logRef: number;
   summary: string;
 };
@@ -201,8 +230,25 @@ export type TaskLogSummary = {
 };
 
 export type TaskLogDetail = TaskLogSummary & {
+  inputParams?: Record<string, unknown>;
+  executionSteps?: TaskLogExecutionStep[];
+  failureReason?: TaskLogFailureReason | null;
   operatorUser?: number | null;
   createTime?: string | null;
+};
+
+export type TaskLogExecutionStep = {
+  stepIndex: number;
+  stepName: string;
+  status: string;
+  detail?: string | null;
+};
+
+export type TaskLogFailureReason = {
+  code?: string;
+  step?: string;
+  reason?: string;
+  rawMessage?: string;
 };
 
 export type RoleSummary = {
@@ -320,6 +366,10 @@ export function listImportHistory() {
   return apiGet<ImportHistory[]>('/imports/history');
 }
 
+export function getImportDetail(importId: number) {
+  return apiGet<ImportDetail>(`/imports/${importId}`);
+}
+
 export function listDatasets() {
   return apiGet<DatasetSummary[]>('/datasets');
 }
@@ -418,6 +468,19 @@ export function queryIntegration(payload: {
   return apiPost<IntegrationResponse>('/queries/integration', payload);
 }
 
+export function saveIntegrationResult(payload: {
+  leftDatasetId: number;
+  rightDatasetId: number;
+  mode: 'JOIN' | 'UNION';
+  leftField?: string;
+  rightField?: string;
+  limit?: number;
+  outputDatasetName: string;
+  outputBusinessDomain?: BusinessDomain;
+}) {
+  return apiPost<IntegrationSaveResponse>('/queries/integration/save', payload);
+}
+
 export function listGovernanceOperators() {
   return apiGet<GovernanceOperator[]>('/governance/operators');
 }
@@ -471,6 +534,10 @@ export function updateTask(
   }
 ) {
   return apiPut<TaskSummary>(`/tasks/${taskId}`, payload);
+}
+
+export function deleteTask(taskId: number) {
+  return apiDelete<void>(`/tasks/${taskId}`);
 }
 
 export function triggerTask(taskId: number) {

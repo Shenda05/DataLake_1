@@ -1,11 +1,14 @@
 package com.datalake.platform.task;
 
 import com.datalake.platform.common.util.GeneratedKeyUtils;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -15,9 +18,11 @@ import org.springframework.stereotype.Service;
 public class TaskLogService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
 
-    public TaskLogService(JdbcTemplate jdbcTemplate) {
+    public TaskLogService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
     }
 
     public List<TaskLogSummary> list() {
@@ -49,6 +54,7 @@ public class TaskLogService {
         TaskLogDetail detail = jdbcTemplate.query(
             """
                 select l.log_id,l.task_id,l.task_type,l.target_id,l.start_time,l.end_time,l.status,l.execution_summary,l.error_message,l.duration,l.operator_user,l.create_time,
+                       l.input_params,l.execution_steps,l.failure_reason,
                        coalesce(t.task_name, case when l.task_type = 'GOVERNANCE' then '手动治理执行' else '手动任务执行' end) as task_name
                 from task_log l
                 left join task_def t on t.task_id = l.task_id
@@ -67,6 +73,9 @@ public class TaskLogService {
                     rs.getLong("duration"),
                     rs.getString("execution_summary"),
                     rs.getString("error_message"),
+                    parseInputParams(rs.getString("input_params")),
+                    parseExecutionSteps(rs.getString("execution_steps")),
+                    parseFailureReason(rs.getString("failure_reason")),
                     (Long) rs.getObject("operator_user"),
                     rs.getTimestamp("create_time") == null ? null : rs.getTimestamp("create_time").toLocalDateTime().toString()
                 )
@@ -90,12 +99,29 @@ public class TaskLogService {
         String errorMessage,
         Long operatorUser
     ) {
+        return record(taskId, taskType, targetId, startTime, endTime, status, executionSummary, errorMessage, operatorUser, Map.of(), List.of(), null);
+    }
+
+    public Long record(
+        Long taskId,
+        String taskType,
+        Long targetId,
+        Instant startTime,
+        Instant endTime,
+        String status,
+        String executionSummary,
+        String errorMessage,
+        Long operatorUser,
+        Map<String, Object> inputParams,
+        List<ExecutionStep> executionSteps,
+        FailureReason failureReason
+    ) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
                 """
-                    insert into task_log(task_id,task_type,target_id,start_time,end_time,status,execution_summary,error_message,duration,operator_user,create_time)
-                    values(?,?,?,?,?,?,?,?,?,?,?)
+                    insert into task_log(task_id,task_type,target_id,start_time,end_time,status,execution_summary,error_message,input_params,execution_steps,failure_reason,duration,operator_user,create_time)
+                    values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 Statement.RETURN_GENERATED_KEYS
             );
@@ -107,12 +133,68 @@ public class TaskLogService {
             statement.setString(6, status);
             statement.setString(7, executionSummary);
             statement.setString(8, errorMessage);
-            statement.setLong(9, durationSeconds(startTime, endTime));
-            statement.setObject(10, operatorUser);
-            statement.setTimestamp(11, Timestamp.from(Instant.now()));
+            statement.setString(9, clipJson(toJson(inputParams)));
+            statement.setString(10, clipJson(toJson(executionSteps)));
+            statement.setString(11, clipJson(toJson(failureReason)));
+            statement.setLong(12, durationSeconds(startTime, endTime));
+            statement.setObject(13, operatorUser);
+            statement.setTimestamp(14, Timestamp.from(Instant.now()));
             return statement;
         }, keyHolder);
         return GeneratedKeyUtils.getLongId(keyHolder, "log_id");
+    }
+
+    private Map<String, Object> parseInputParams(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(raw, new TypeReference<Map<String, Object>>() {
+            });
+        } catch (Exception exception) {
+            return Map.of("raw", raw, "parseError", exception.getMessage());
+        }
+    }
+
+    private List<ExecutionStep> parseExecutionSteps(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(raw, new TypeReference<List<ExecutionStep>>() {
+            });
+        } catch (Exception exception) {
+            return List.of(new ExecutionStep(0, "PARSE_ERROR", "FAILED", "执行步骤解析失败: " + exception.getMessage()));
+        }
+    }
+
+    private FailureReason parseFailureReason(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(raw, FailureReason.class);
+        } catch (Exception exception) {
+            return new FailureReason("RAW_FAILURE_REASON", "UNKNOWN", "结构化失败原因解析失败", raw);
+        }
+    }
+
+    private String toJson(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception exception) {
+            return "{\"serializeError\":\"" + exception.getMessage() + "\"}";
+        }
+    }
+
+    private String clipJson(String json) {
+        if (json == null || json.length() <= 3900) {
+            return json;
+        }
+        return json.substring(0, 3900) + "...";
     }
 
     private long durationSeconds(Instant startTime, Instant endTime) {
@@ -149,8 +231,17 @@ public class TaskLogService {
         Long duration,
         String executionSummary,
         String errorMessage,
+        Map<String, Object> inputParams,
+        List<ExecutionStep> executionSteps,
+        FailureReason failureReason,
         Long operatorUser,
         String createTime
     ) {
+    }
+
+    public record ExecutionStep(Integer stepIndex, String stepName, String status, String detail) {
+    }
+
+    public record FailureReason(String code, String step, String reason, String rawMessage) {
     }
 }

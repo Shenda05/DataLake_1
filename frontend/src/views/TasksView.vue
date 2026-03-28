@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { isAuthExpiredError } from '../api/client';
 import {
   createTask,
+  deleteTask,
   listGovernanceFlows,
   listImportHistory,
   listTaskLogs,
@@ -329,6 +330,27 @@ async function handleResume(taskId: number) {
     await loadData();
   } catch (error) {
     ElMessage.error(`恢复失败: ${(error as Error).message}`);
+  }
+}
+
+async function handleDelete(task: TaskSummary) {
+  if (!canManageTasks.value) {
+    ElMessage.warning('当前角色没有任务配置权限');
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(`确定删除任务「${task.taskName}」吗？`, '删除确认', { type: 'warning' });
+    await deleteTask(task.taskId);
+    if (editingTaskId.value === task.taskId) {
+      resetForm();
+      syncRouteState({ taskId: '' });
+    }
+    recentAction.value = { type: 'info', message: '任务已删除。' };
+    await loadData();
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(`删除失败: ${(error as Error).message}`);
+    }
   }
 }
 
@@ -855,11 +877,12 @@ onBeforeUnmount(() => {
         </el-table-column>
         <el-table-column prop="nextRunTime" label="下次执行时间" width="180" />
         <el-table-column prop="lastRunTime" label="最近执行时间" width="180" />
-        <el-table-column label="操作" width="240">
+        <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <el-button v-if="canTriggerTasks" link type="primary" @click.stop="handleTrigger(row.taskId)">立即执行</el-button>
             <el-button v-if="canManageTasks" link type="warning" @click.stop="handlePause(row.taskId)">暂停</el-button>
             <el-button v-if="canManageTasks" link type="success" @click.stop="handleResume(row.taskId)">恢复</el-button>
+            <el-button v-if="canManageTasks" link type="danger" @click.stop="handleDelete(row)">删除</el-button>
             <span v-if="!canManageTasks && !canTriggerTasks" class="inline-tip">仅查看</span>
           </template>
         </el-table-column>

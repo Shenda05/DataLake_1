@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import * as echarts from 'echarts';
+import { useRouter } from 'vue-router';
 import { isAuthExpiredError } from '../api/client';
 import {
   exportFilterQuery,
@@ -13,6 +14,8 @@ import {
   listMetadata,
   queryEcommerceMetric,
   queryIntegration,
+  saveIntegrationResult,
+  type BusinessDomain,
   sqlQuery,
   type DatasetSummary,
   type IntegrationResponse,
@@ -22,6 +25,7 @@ import { useAuthStore } from '../stores/auth';
 
 const chartRef = ref<HTMLDivElement | null>(null);
 const metricChartRef = ref<HTMLDivElement | null>(null);
+const router = useRouter();
 const authStore = useAuthStore();
 const activeTab = ref<'base' | 'metric' | 'integration'>('base');
 const datasets = ref<DatasetSummary[]>([]);
@@ -40,11 +44,21 @@ const metricData = ref<{ name: string; value: number }[]>([]);
 const metricTable = ref<Record<string, unknown>[]>([]);
 const metricDescription = ref('');
 const integrationResult = ref<IntegrationResponse | null>(null);
+const integrationSaving = ref(false);
 const resultColumns = computed(() => Object.keys(tableData.value[0] || {}));
 const metricColumns = computed(() => Object.keys(metricTable.value[0] || {}));
 const integrationColumns = computed(() => integrationResult.value?.columns || []);
 const canExportQuery = computed(() => authStore.hasAction('query.export'));
 const lastQueryMode = ref<'FILTER' | 'SQL'>('FILTER');
+const businessDomainOptions: Array<{ label: string; value: BusinessDomain }> = [
+  { label: '用户域', value: 'USER' },
+  { label: '商品域', value: 'PRODUCT' },
+  { label: '交易域', value: 'TRADE' },
+  { label: '支付域', value: 'PAYMENT' },
+  { label: '库存域', value: 'INVENTORY' },
+  { label: '评价域', value: 'REVIEW' },
+  { label: '行为日志域', value: 'BEHAVIOR_LOG' }
+];
 const form = reactive({
   datasetId: undefined as number | undefined,
   field: '',
@@ -68,7 +82,9 @@ const integrationForm = reactive({
   mode: 'JOIN' as 'JOIN' | 'UNION',
   leftField: '',
   rightField: '',
-  limit: 200
+  limit: 200,
+  outputDatasetName: '',
+  outputBusinessDomain: 'TRADE' as BusinessDomain
 });
 // [旧通用版共用] 条件查询与 SQL 查询能力保留，仅在同页增加电商指标与集成子标签。
 let chart: echarts.ECharts | null = null;
@@ -144,6 +160,12 @@ async function loadBaseData() {
   } else if (datasets.value.length === 1) {
     integrationForm.leftDatasetId = datasets.value[0].datasetId;
     integrationForm.rightDatasetId = datasets.value[0].datasetId;
+  }
+  if (!integrationForm.outputDatasetName) {
+    integrationForm.outputDatasetName = buildIntegrationOutputName();
+  }
+  if (!integrationForm.outputBusinessDomain) {
+    integrationForm.outputBusinessDomain = resolveDatasetBusinessDomain(integrationForm.leftDatasetId);
   }
   await Promise.all([loadDatasetAnalysis(), loadIntegrationMetadata()]);
 }
@@ -290,9 +312,54 @@ async function runIntegration() {
       rightField: integrationForm.rightField || undefined,
       limit: integrationForm.limit
     });
+    if (!integrationForm.outputDatasetName.trim()) {
+      integrationForm.outputDatasetName = buildIntegrationOutputName();
+    }
+    integrationForm.outputBusinessDomain = resolveDatasetBusinessDomain(integrationForm.leftDatasetId);
   } catch (error) {
     ElMessage.error(`数据集成失败: ${(error as Error).message}`);
   }
+}
+
+async function saveIntegrationAsDataset() {
+  if (!integrationResult.value) {
+    ElMessage.warning('请先执行数据集成');
+    return;
+  }
+  if (!integrationForm.outputDatasetName.trim()) {
+    ElMessage.warning('请填写输出数据集名称');
+    return;
+  }
+  integrationSaving.value = true;
+  try {
+    const created = await saveIntegrationResult({
+      leftDatasetId: integrationForm.leftDatasetId!,
+      rightDatasetId: integrationForm.rightDatasetId!,
+      mode: integrationForm.mode,
+      leftField: integrationForm.leftField || undefined,
+      rightField: integrationForm.rightField || undefined,
+      limit: integrationForm.limit,
+      outputDatasetName: integrationForm.outputDatasetName.trim(),
+      outputBusinessDomain: integrationForm.outputBusinessDomain
+    });
+    ElMessage.success(`集成结果已保存为数据集：${created.datasetName}`);
+    await router.push({ name: 'datasets', query: { datasetId: String(created.datasetId) } });
+  } catch (error) {
+    ElMessage.error(`保存集成结果失败: ${(error as Error).message}`);
+  } finally {
+    integrationSaving.value = false;
+  }
+}
+
+function resolveDatasetBusinessDomain(datasetId?: number) {
+  return datasets.value.find((item) => item.datasetId === datasetId)?.businessDomain || 'TRADE';
+}
+
+function buildIntegrationOutputName() {
+  const left = datasets.value.find((item) => item.datasetId === integrationForm.leftDatasetId)?.datasetName || 'left';
+  const right = datasets.value.find((item) => item.datasetId === integrationForm.rightDatasetId)?.datasetName || 'right';
+  const suffix = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+  return `${left}_${integrationForm.mode}_${right}_${suffix}`;
 }
 
 watch(
@@ -305,6 +372,10 @@ watch(
 watch(
   () => [integrationForm.leftDatasetId, integrationForm.rightDatasetId],
   () => {
+    integrationForm.outputBusinessDomain = resolveDatasetBusinessDomain(integrationForm.leftDatasetId);
+    if (!integrationForm.outputDatasetName.trim()) {
+      integrationForm.outputDatasetName = buildIntegrationOutputName();
+    }
     void loadIntegrationMetadata();
   }
 );
@@ -571,8 +642,32 @@ onBeforeUnmount(() => {
             <el-form-item label="结果上限">
               <el-input-number v-model="integrationForm.limit" :min="1" :max="1000" />
             </el-form-item>
+            <el-form-item label="输出数据集名称">
+              <el-input v-model="integrationForm.outputDatasetName" placeholder="例如 商品订单集成结果_20260327" />
+            </el-form-item>
+            <el-form-item label="输出业务域">
+              <el-select v-model="integrationForm.outputBusinessDomain" placeholder="请选择业务域">
+                <el-option
+                  v-for="domain in businessDomainOptions"
+                  :key="domain.value"
+                  :label="domain.label"
+                  :value="domain.value"
+                />
+              </el-select>
+            </el-form-item>
             <el-form-item>
               <el-button type="primary" @click="runIntegration">执行数据集成</el-button>
+            </el-form-item>
+            <el-form-item>
+              <el-button
+                type="success"
+                plain
+                :disabled="!integrationResult"
+                :loading="integrationSaving"
+                @click="saveIntegrationAsDataset"
+              >
+                保存为新数据集
+              </el-button>
             </el-form-item>
           </el-form>
 
@@ -580,6 +675,12 @@ onBeforeUnmount(() => {
             class="notice-box"
             title="MVP 支持 JOIN/UNION，可用于用户+订单、商品+订单、商品+库存三类核心集成。"
             type="info"
+            :closable="false"
+          />
+          <el-alert
+            class="notice-box"
+            title="保存动作仅落库当前集成结果快照（受“结果上限”限制）。"
+            type="warning"
             :closable="false"
           />
 

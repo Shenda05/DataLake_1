@@ -73,8 +73,8 @@ public final class DemoDataFactory {
 
     public static List<Map<String, Object>> datasets() {
         return List.of(
-            ordered("datasetId", 2001L, "datasetName", "订单明细数据", "businessDomain", "TRADE", "sourceId", 1001L, "formatType", "CSV", "recordCount", 1280, "fieldCount", 12, "status", "READY", "creator", "admin"),
-            ordered("datasetId", 2002L, "datasetName", "库存快照数据", "businessDomain", "INVENTORY", "sourceId", 1001L, "formatType", "JSON", "recordCount", 640, "fieldCount", 8, "status", "READY", "creator", "operator")
+            ordered("datasetId", 2001L, "datasetName", "订单明细数据", "businessDomain", "TRADE", "sourceId", 1001L, "formatType", "CSV", "recordCount", 1280, "fieldCount", 12, "status", "READY", "creator", 1L, "physicalTableName", "dl_dataset_2001"),
+            ordered("datasetId", 2002L, "datasetName", "库存快照数据", "businessDomain", "INVENTORY", "sourceId", 1001L, "formatType", "JSON", "recordCount", 640, "fieldCount", 8, "status", "READY", "creator", 2L, "physicalTableName", "dl_dataset_2002")
         );
     }
 
@@ -96,15 +96,15 @@ public final class DemoDataFactory {
     public static List<Map<String, Object>> metadata(Long datasetId) {
         if (datasetId == 2002L) {
             return List.of(
-                ordered("fieldId", 1L, "datasetId", datasetId, "fieldName", "product_id", "fieldType", "STRING", "nullable", false, "sampleValue", "SKU-1001"),
-                ordered("fieldId", 2L, "datasetId", datasetId, "fieldName", "stock", "fieldType", "BIGINT", "nullable", false, "sampleValue", "12"),
-                ordered("fieldId", 3L, "datasetId", datasetId, "fieldName", "warehouse", "fieldType", "STRING", "nullable", true, "sampleValue", "华东仓")
+                ordered("fieldId", 1L, "datasetId", datasetId, "fieldName", "product_id", "physicalColumnName", "product_id", "fieldType", "STRING", "nullable", false, "sampleValue", "SKU-1001", "fieldOrder", 1),
+                ordered("fieldId", 2L, "datasetId", datasetId, "fieldName", "stock", "physicalColumnName", "stock", "fieldType", "BIGINT", "nullable", false, "sampleValue", "12", "fieldOrder", 2),
+                ordered("fieldId", 3L, "datasetId", datasetId, "fieldName", "warehouse", "physicalColumnName", "warehouse", "fieldType", "STRING", "nullable", true, "sampleValue", "华东仓", "fieldOrder", 3)
             );
         }
         return List.of(
-            ordered("fieldId", 1L, "datasetId", datasetId, "fieldName", "order_id", "fieldType", "STRING", "nullable", false, "sampleValue", "ORD-20260327001"),
-            ordered("fieldId", 2L, "datasetId", datasetId, "fieldName", "product_id", "fieldType", "STRING", "nullable", false, "sampleValue", "SKU-1001"),
-            ordered("fieldId", 3L, "datasetId", datasetId, "fieldName", "amount", "fieldType", "DOUBLE", "nullable", true, "sampleValue", "129.9")
+            ordered("fieldId", 1L, "datasetId", datasetId, "fieldName", "order_id", "physicalColumnName", "order_id", "fieldType", "STRING", "nullable", false, "sampleValue", "ORD-20260327001", "fieldOrder", 1),
+            ordered("fieldId", 2L, "datasetId", datasetId, "fieldName", "product_id", "physicalColumnName", "product_id", "fieldType", "STRING", "nullable", false, "sampleValue", "SKU-1001", "fieldOrder", 2),
+            ordered("fieldId", 3L, "datasetId", datasetId, "fieldName", "amount", "physicalColumnName", "amount", "fieldType", "DOUBLE", "nullable", true, "sampleValue", "129.9", "fieldOrder", 3)
         );
     }
 
@@ -178,8 +178,54 @@ public final class DemoDataFactory {
 
     public static List<Map<String, Object>> taskLogs() {
         return List.of(
-            ordered("logId", 4001L, "taskId", 3001L, "taskName", "每日订单导入任务", "status", "SUCCESS", "startTime", "2026-03-27 02:00", "endTime", "2026-03-27 02:03", "duration", 180, "message", "导入 1280 条，0 条失败"),
-            ordered("logId", 4002L, "taskId", 3002L, "taskName", "订单自动治理任务", "status", "FAILED", "startTime", "2026-03-27 02:30", "endTime", "2026-03-27 02:31", "duration", 60, "message", "字段 order_time 时间格式不符合要求")
+            ordered(
+                "logId",
+                4001L,
+                "taskId",
+                3001L,
+                "taskName",
+                "每日订单导入任务",
+                "taskType",
+                "IMPORT",
+                "targetId",
+                5001L,
+                "status",
+                "SUCCESS",
+                "startTime",
+                "2026-03-27 02:00",
+                "endTime",
+                "2026-03-27 02:03",
+                "duration",
+                180,
+                "executionSummary",
+                "导入 1280 条，0 条失败",
+                "errorMessage",
+                ""
+            ),
+            ordered(
+                "logId",
+                4002L,
+                "taskId",
+                3002L,
+                "taskName",
+                "订单自动治理任务",
+                "taskType",
+                "GOVERNANCE",
+                "targetId",
+                7001L,
+                "status",
+                "FAILED",
+                "startTime",
+                "2026-03-27 02:30",
+                "endTime",
+                "2026-03-27 02:31",
+                "duration",
+                60,
+                "executionSummary",
+                "治理执行失败",
+                "errorMessage",
+                "字段 order_time 时间格式不符合要求"
+            )
         );
     }
 

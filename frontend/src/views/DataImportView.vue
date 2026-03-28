@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { useRoute } from 'vue-router';
 import { isAuthExpiredError } from '../api/client';
 import {
+  getImportDetail,
   importDatabase,
   importFile,
   listDataSources,
@@ -13,15 +15,20 @@ import {
   type DataSource,
   type DatabasePreview,
   type DatabaseTableOption,
+  type ImportDetail,
   type ImportHistory
 } from '../api/platform';
 import { useAuthStore } from '../stores/auth';
 
 const authStore = useAuthStore();
+const route = useRoute();
 const dataSources = ref<DataSource[]>([]);
 const history = ref<ImportHistory[]>([]);
+const selectedImportDetail = ref<ImportDetail | null>(null);
 const selectedFile = ref<File | null>(null);
 const loading = ref(false);
+const detailLoading = ref(false);
+const detailDrawerVisible = ref(false);
 const activeTab = ref<'file' | 'database'>('file');
 const databaseTables = ref<DatabaseTableOption[]>([]);
 const databasePreview = ref<DatabasePreview | null>(null);
@@ -57,6 +64,14 @@ const canImportDatabase = computed(() => authStore.hasAction('import.database'))
 async function loadBaseData() {
   dataSources.value = await listDataSources();
   history.value = await listImportHistory();
+  const routeImportId = readRouteImportId();
+  if (
+    routeImportId &&
+    history.value.some((item) => item.importId === routeImportId) &&
+    selectedImportDetail.value?.importId !== routeImportId
+  ) {
+    await openImportDetail(routeImportId);
+  }
   if (!fileForm.sourceId && fileSources.value.length > 0) {
     fileForm.sourceId = fileSources.value[0].sourceId;
   }
@@ -97,6 +112,51 @@ async function submitFileImport() {
   } finally {
     loading.value = false;
   }
+}
+
+function readRouteImportId() {
+  const raw = route.query.importId;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function resolveSourceLabel(sourceId?: number | null) {
+  if (!sourceId) {
+    return '-';
+  }
+  const matched = dataSources.value.find((item) => item.sourceId === sourceId);
+  return matched?.sourceName || `数据源 ${sourceId}`;
+}
+
+function resolveOriginLabel(detail?: ImportDetail | null) {
+  if (!detail) {
+    return '-';
+  }
+  if (detail.originalFileName && detail.originalFileName.trim()) {
+    return detail.originalFileName;
+  }
+  if (detail.filePath && detail.filePath.trim()) {
+    return detail.filePath;
+  }
+  return '-';
+}
+
+async function openImportDetail(importId: number) {
+  detailLoading.value = true;
+  detailDrawerVisible.value = true;
+  try {
+    selectedImportDetail.value = await getImportDetail(importId);
+  } catch (error) {
+    detailDrawerVisible.value = false;
+    ElMessage.error(`导入详情加载失败: ${(error as Error).message}`);
+  } finally {
+    detailLoading.value = false;
+  }
+}
+
+function handleHistoryDetail(row: ImportHistory) {
+  void openImportDetail(row.importId);
 }
 
 async function loadDatabaseTables() {
@@ -216,6 +276,19 @@ watch(
     }
   },
   { immediate: true }
+);
+
+watch(
+  () => route.query.importId,
+  () => {
+    const importId = readRouteImportId();
+    if (!importId || selectedImportDetail.value?.importId === importId) {
+      return;
+    }
+    if (history.value.some((item) => item.importId === importId)) {
+      void openImportDetail(importId);
+    }
+  }
 );
 
 onMounted(async () => {
@@ -382,7 +455,30 @@ onMounted(async () => {
         <el-table-column prop="recordCount" label="记录数" width="100" />
         <el-table-column prop="status" label="状态" width="120" />
         <el-table-column prop="errorMessage" label="错误信息" />
+        <el-table-column label="操作" width="120">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="handleHistoryDetail(row)">详情</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
+
+    <el-drawer v-model="detailDrawerVisible" title="导入历史详情" size="42%">
+      <div v-loading="detailLoading" class="page-grid">
+        <el-descriptions v-if="selectedImportDetail" :column="1" border>
+          <el-descriptions-item label="导入编号">{{ selectedImportDetail.importId }}</el-descriptions-item>
+          <el-descriptions-item label="数据集">{{ selectedImportDetail.datasetName }}</el-descriptions-item>
+          <el-descriptions-item label="业务域">{{ selectedImportDetail.businessDomain }}</el-descriptions-item>
+          <el-descriptions-item label="格式">{{ selectedImportDetail.formatType }}</el-descriptions-item>
+          <el-descriptions-item label="来源数据源">{{ resolveSourceLabel(selectedImportDetail.sourceId) }}</el-descriptions-item>
+          <el-descriptions-item label="来源文件/表">{{ resolveOriginLabel(selectedImportDetail) }}</el-descriptions-item>
+          <el-descriptions-item label="记录数">{{ selectedImportDetail.recordCount }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ selectedImportDetail.status }}</el-descriptions-item>
+          <el-descriptions-item label="错误信息">{{ selectedImportDetail.errorMessage || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="创建时间">{{ selectedImportDetail.createTime }}</el-descriptions-item>
+        </el-descriptions>
+        <el-empty v-else description="暂无导入详情" />
+      </div>
+    </el-drawer>
   </div>
 </template>
