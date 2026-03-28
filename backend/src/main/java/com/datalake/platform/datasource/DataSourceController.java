@@ -56,6 +56,16 @@ public class DataSourceController {
         return ApiResponse.success(dataSourceService.test(sourceId), requestId(request));
     }
 
+    @PostMapping("/{sourceId}/status")
+    @PreAuthorize("hasAuthority('ACTION_source.manage')")
+    public ApiResponse<?> updateStatus(
+        @PathVariable Long sourceId,
+        @Valid @RequestBody UpdateSourceStatusRequest body,
+        HttpServletRequest request
+    ) {
+        return ApiResponse.success(dataSourceService.updateStatus(sourceId, body.status()), requestId(request));
+    }
+
     private String requestId(HttpServletRequest request) {
         return request.getAttribute(RequestIdFilter.REQUEST_ID_ATTR).toString();
     }
@@ -70,5 +80,8 @@ public class DataSourceController {
         String password,
         String description
     ) {
+    }
+
+    public record UpdateSourceStatusRequest(@NotBlank(message = "status 不能为空") String status) {
     }
 }

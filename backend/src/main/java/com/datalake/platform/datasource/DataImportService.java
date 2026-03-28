@@ -18,7 +18,10 @@ import java.sql.ResultSetMetaData;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +62,7 @@ public class DataImportService {
     }
 
     public ImportResult importFile(MultipartFile file, String datasetName, String businessDomain, Long sourceId, Long userId) throws IOException {
+        ensureSourceEnabled(sourceId);
         String normalizedDomain = BusinessDomainCatalog.normalize(businessDomain);
         String originalFilename = file.getOriginalFilename();
         if (originalFilename == null) {
@@ -121,6 +125,7 @@ public class DataImportService {
         String description,
         Long userId
     ) {
+        ensureSourceEnabled(sourceId);
         String normalizedDomain = BusinessDomainCatalog.normalize(businessDomain);
         DatabaseTableSnapshot snapshot = readDatabaseTableSnapshot(sourceId, schemaName, tableName, 0);
         String storagePath = buildDatabaseImportPath(sourceId, snapshot.schemaName(), snapshot.tableName());
@@ -167,6 +172,7 @@ public class DataImportService {
 
     public ImportResult rerunImport(Long importId, Long userId, String triggerName) {
         ImportDetail detail = detail(importId);
+        ensureSourceEnabled(detail.sourceId());
         if (detail.filePath().startsWith(DATABASE_IMPORT_PREFIX)) {
             return rerunDatabaseImport(detail, userId, triggerName);
         }
@@ -266,12 +272,41 @@ public class DataImportService {
     }
 
     public List<ImportHistoryItem> history() {
-        return jdbcTemplate.query(
+        return history(null, null, null, null);
+    }
+
+    public List<ImportHistoryItem> history(String businessDomain, String status, String startTime, String endTime) {
+        StringBuilder sql = new StringBuilder(
             """
-                select import_id,source_id,dataset_name,business_domain,format_type,status,record_count,error_message,create_time
-                from import_record
-                order by import_id desc
-            """,
+                select ir.import_id,ir.source_id,ir.dataset_name,ir.business_domain,ir.format_type,ir.status,ir.record_count,ir.error_message,
+                       ir.create_user,u.username as operator_name,ir.create_time
+                from import_record ir
+                left join sys_user u on u.user_id = ir.create_user
+                where 1 = 1
+            """
+        );
+        List<Object> args = new ArrayList<>();
+        if (businessDomain != null && !businessDomain.isBlank()) {
+            sql.append(" and ir.business_domain = ?");
+            args.add(BusinessDomainCatalog.normalize(businessDomain));
+        }
+        if (status != null && !status.isBlank()) {
+            sql.append(" and ir.status = ?");
+            args.add(status.trim().toUpperCase(Locale.ROOT));
+        }
+        LocalDateTime start = parseHistoryTime(startTime, false);
+        LocalDateTime end = parseHistoryTime(endTime, true);
+        if (start != null) {
+            sql.append(" and ir.create_time >= ?");
+            args.add(Timestamp.valueOf(start));
+        }
+        if (end != null) {
+            sql.append(" and ir.create_time <= ?");
+            args.add(Timestamp.valueOf(end));
+        }
+        sql.append(" order by ir.import_id desc");
+        return jdbcTemplate.query(
+            sql.toString(),
             (rs, rowNum) -> new ImportHistoryItem(
                 rs.getLong("import_id"),
                 (Long) rs.getObject("source_id"),
@@ -281,17 +316,24 @@ public class DataImportService {
                 rs.getString("status"),
                 rs.getLong("record_count"),
                 rs.getString("error_message"),
+                (Long) rs.getObject("create_user"),
+                rs.getString("operator_name"),
                 rs.getTimestamp("create_time").toLocalDateTime().toString()
-            )
+            ),
+            args.toArray()
         );
     }
 
     public ImportDetail detail(Long importId) {
         ImportDetail detail = jdbcTemplate.query(
             """
-                select import_id,source_id,dataset_name,business_domain,format_type,original_file_name,file_path,status,record_count,error_message,create_user,create_time
-                from import_record
-                where import_id = ?
+                select ir.import_id,ir.source_id,ir.dataset_name,ir.business_domain,ir.format_type,ir.original_file_name,ir.file_path,
+                       ir.status,ir.record_count,ir.error_message,ir.create_user,ir.create_time,
+                       u.username as operator_name,ds.source_name,ds.source_type
+                from import_record ir
+                left join sys_user u on u.user_id = ir.create_user
+                left join data_source ds on ds.source_id = ir.source_id
+                where ir.import_id = ?
             """,
             rs -> rs.next()
                 ? new ImportDetail(
@@ -306,7 +348,23 @@ public class DataImportService {
                     rs.getLong("record_count"),
                     rs.getString("error_message"),
                     (Long) rs.getObject("create_user"),
-                    rs.getTimestamp("create_time").toLocalDateTime().toString()
+                    rs.getString("operator_name"),
+                    rs.getString("source_name"),
+                    rs.getString("source_type"),
+                    rs.getTimestamp("create_time").toLocalDateTime().toString(),
+                    buildImportParams(
+                        rs.getLong("import_id"),
+                        (Long) rs.getObject("source_id"),
+                        rs.getString("source_name"),
+                        rs.getString("source_type"),
+                        rs.getString("dataset_name"),
+                        rs.getString("business_domain"),
+                        rs.getString("format_type"),
+                        rs.getString("original_file_name"),
+                        rs.getString("file_path"),
+                        rs.getString("status"),
+                        rs.getLong("record_count")
+                    )
                 )
                 : null,
             importId
@@ -486,6 +544,76 @@ public class DataImportService {
         return GeneratedKeyUtils.getLongId(keyHolder, "import_id");
     }
 
+    private DataSourceService.DataSourceConnectionInfo ensureSourceEnabled(Long sourceId) {
+        if (sourceId == null) {
+            throw new IllegalArgumentException("sourceId 不能为空");
+        }
+        DataSourceService.DataSourceConnectionInfo source = dataSourceService.connectionInfo(sourceId);
+        if (!"ENABLED".equalsIgnoreCase(source.status())) {
+            throw new IllegalArgumentException("数据源已停用，禁止导入: " + source.sourceName());
+        }
+        return source;
+    }
+
+    private LocalDateTime parseHistoryTime(String raw, boolean endOfDay) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String normalized = raw.trim();
+        try {
+            if (normalized.length() == 10) {
+                LocalDate date = LocalDate.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE);
+                return endOfDay ? date.atTime(23, 59, 59) : date.atStartOfDay();
+            }
+            if (normalized.contains(" ") && !normalized.contains("T")) {
+                normalized = normalized.replace(" ", "T");
+            }
+            return LocalDateTime.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        } catch (DateTimeParseException exception) {
+            throw new IllegalArgumentException("时间格式无效: " + raw + "，请使用 yyyy-MM-dd 或 yyyy-MM-ddTHH:mm:ss");
+        }
+    }
+
+    private Map<String, Object> buildImportParams(
+        Long importId,
+        Long sourceId,
+        String sourceName,
+        String sourceType,
+        String datasetName,
+        String businessDomain,
+        String formatType,
+        String originalFileName,
+        String filePath,
+        String status,
+        Long recordCount
+    ) {
+        LinkedHashMap<String, Object> params = new LinkedHashMap<>();
+        params.put("importId", importId);
+        params.put("sourceId", sourceId);
+        params.put("sourceName", sourceName);
+        params.put("sourceType", sourceType);
+        params.put("datasetName", datasetName);
+        params.put("businessDomain", businessDomain);
+        params.put("formatType", formatType);
+        params.put("status", status);
+        params.put("recordCount", recordCount);
+        params.put("originalFileName", originalFileName);
+        params.put("storagePath", filePath);
+        if (filePath != null && filePath.startsWith(DATABASE_IMPORT_PREFIX)) {
+            params.put("importMode", "DATABASE_TABLE");
+            try {
+                DatabaseImportPath dbPath = parseDatabaseImportPath(filePath);
+                params.put("schemaName", dbPath.schemaName());
+                params.put("tableName", dbPath.tableName());
+            } catch (Exception exception) {
+                params.put("databasePathParseError", exception.getMessage());
+            }
+        } else {
+            params.put("importMode", "FILE_UPLOAD");
+        }
+        return params;
+    }
+
     private String detectFormat(String filename) {
         String lower = filename.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".csv")) {
@@ -598,6 +726,8 @@ public class DataImportService {
         String status,
         Long recordCount,
         String errorMessage,
+        Long createUser,
+        String operatorName,
         String createTime
     ) {
     }
@@ -614,7 +744,11 @@ public class DataImportService {
         Long recordCount,
         String errorMessage,
         Long createUser,
-        String createTime
+        String operatorName,
+        String sourceName,
+        String sourceType,
+        String createTime,
+        Map<String, Object> importParams
     ) {
     }
 

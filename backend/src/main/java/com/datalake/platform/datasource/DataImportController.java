@@ -91,8 +91,14 @@ public class DataImportController {
     }
 
     @GetMapping("/history")
-    public ApiResponse<?> history(HttpServletRequest request) {
-        return ApiResponse.success(dataImportService.history(), requestId(request));
+    public ApiResponse<?> history(
+        @RequestParam(value = "businessDomain", required = false) String businessDomain,
+        @RequestParam(value = "status", required = false) String status,
+        @RequestParam(value = "startTime", required = false) String startTime,
+        @RequestParam(value = "endTime", required = false) String endTime,
+        HttpServletRequest request
+    ) {
+        return ApiResponse.success(dataImportService.history(businessDomain, status, startTime, endTime), requestId(request));
     }
 
     @GetMapping("/{importId}")

@@ -7,9 +7,12 @@ import {
   deleteDataset,
   exportDataset,
   getDatasetDetail,
+  listDataSources,
   listDatasets,
   listMetadata,
   previewDatasetWithFilter,
+  type BusinessDomain,
+  type DataSource,
   type DatasetDetail,
   type DatasetSummary,
   type MetaField,
@@ -20,7 +23,13 @@ import { useAuthStore } from '../stores/auth';
 const authStore = useAuthStore();
 const route = useRoute();
 const datasets = ref<DatasetSummary[]>([]);
-const domainFilter = ref('');
+const dataSources = ref<DataSource[]>([]);
+const datasetFilters = reactive({
+  keyword: '',
+  sourceId: undefined as number | undefined,
+  status: '',
+  businessDomain: '' as '' | BusinessDomain
+});
 const metadata = ref<MetaField[]>([]);
 const previewPage = ref<PageResponse<Record<string, unknown>>>({
   pageNum: 1,
@@ -35,17 +44,41 @@ const previewFilters = reactive({
 });
 const canDeleteDataset = computed(() => authStore.hasAction('dataset.delete'));
 const canExportDataset = computed(() => authStore.hasAction('dataset.export'));
-const filteredDatasets = computed(() =>
-  !domainFilter.value ? datasets.value : datasets.value.filter((item) => item.businessDomain === domainFilter.value)
+const hasActiveDatasetFilters = computed(
+  () =>
+    Boolean(datasetFilters.keyword.trim()) ||
+    datasetFilters.sourceId !== undefined ||
+    Boolean(datasetFilters.status) ||
+    Boolean(datasetFilters.businessDomain)
 );
 
 async function loadDatasets() {
-  datasets.value = await listDatasets();
+  datasets.value = await listDatasets({
+    keyword: datasetFilters.keyword.trim() || undefined,
+    sourceId: datasetFilters.sourceId,
+    status: datasetFilters.status || undefined,
+    businessDomain: datasetFilters.businessDomain || undefined
+  });
   const preferredDatasetId = readRouteDatasetId();
+  const current = selectedDataset.value ? datasets.value.find((item) => item.datasetId === selectedDataset.value?.datasetId) : null;
   const preferred = preferredDatasetId ? datasets.value.find((item) => item.datasetId === preferredDatasetId) : null;
-  const first = preferred || filteredDatasets.value[0] || datasets.value[0];
+  if (preferredDatasetId && !preferred && hasActiveDatasetFilters.value) {
+    ElMessage.info('当前筛选条件下未命中路由指定数据集，可重置筛选后查看。');
+  }
+  const first = current || preferred || datasets.value[0];
   if (first && selectedDataset.value?.datasetId !== first.datasetId) {
     await selectDataset(first.datasetId);
+    return;
+  }
+  if (!first) {
+    selectedDataset.value = null;
+    metadata.value = [];
+    previewPage.value = {
+      pageNum: 1,
+      pageSize: 10,
+      total: 0,
+      records: []
+    };
   }
 }
 
@@ -81,6 +114,22 @@ function readRouteDatasetId() {
 
 function handlePageChange(page: number) {
   void loadPreview(page);
+}
+
+async function applyDatasetFilters() {
+  try {
+    await loadDatasets();
+  } catch (error) {
+    ElMessage.error(`数据集筛选失败: ${(error as Error).message}`);
+  }
+}
+
+async function resetDatasetFilters() {
+  datasetFilters.keyword = '';
+  datasetFilters.sourceId = undefined;
+  datasetFilters.status = '';
+  datasetFilters.businessDomain = '';
+  await applyDatasetFilters();
 }
 
 async function handleSearch() {
@@ -136,6 +185,7 @@ async function handleDelete(dataset: DatasetSummary) {
 
 onMounted(async () => {
   try {
+    dataSources.value = await listDataSources();
     await loadDatasets();
   } catch (error) {
     if (isAuthExpiredError(error)) {
@@ -144,21 +194,6 @@ onMounted(async () => {
     ElMessage.error(`数据集加载失败: ${(error as Error).message}`);
   }
 });
-
-watch(
-  () => domainFilter.value,
-  (value) => {
-    if (!value || !selectedDataset.value) {
-      return;
-    }
-    if (selectedDataset.value.businessDomain !== value) {
-      const next = filteredDatasets.value[0];
-      if (next) {
-        void selectDataset(next.datasetId);
-      }
-    }
-  }
-);
 
 watch(
   () => route.query.datasetId,
@@ -184,8 +219,27 @@ watch(
         </div>
       </template>
       <el-form inline class="notice-box">
+        <el-form-item label="关键字">
+          <el-input v-model="datasetFilters.keyword" placeholder="按数据集名称搜索" />
+        </el-form-item>
+        <el-form-item label="来源数据源">
+          <el-select v-model="datasetFilters.sourceId" clearable placeholder="全部来源">
+            <el-option
+              v-for="source in dataSources"
+              :key="source.sourceId"
+              :label="source.sourceName"
+              :value="source.sourceId"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="datasetFilters.status" clearable placeholder="全部状态">
+            <el-option label="READY" value="READY" />
+            <el-option label="DISABLED" value="DISABLED" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="业务域">
-          <el-select v-model="domainFilter" clearable placeholder="全部业务域">
+          <el-select v-model="datasetFilters.businessDomain" clearable placeholder="全部业务域">
             <el-option label="用户域" value="USER" />
             <el-option label="商品域" value="PRODUCT" />
             <el-option label="交易域" value="TRADE" />
@@ -195,8 +249,12 @@ watch(
             <el-option label="行为日志域" value="BEHAVIOR_LOG" />
           </el-select>
         </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="applyDatasetFilters">筛选</el-button>
+          <el-button @click="resetDatasetFilters">重置</el-button>
+        </el-form-item>
       </el-form>
-      <el-table :data="filteredDatasets" stripe @row-click="handleRowClick">
+      <el-table :data="datasets" stripe @row-click="handleRowClick">
         <el-table-column prop="datasetName" label="数据集名称" />
         <el-table-column prop="businessDomain" label="业务域" width="130" />
         <el-table-column prop="formatType" label="格式" width="120" />
@@ -210,7 +268,7 @@ watch(
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="filteredDatasets.length === 0" description="当前业务域下暂无数据集" />
+      <el-empty v-if="datasets.length === 0" :description="hasActiveDatasetFilters ? '当前筛选条件下暂无数据集' : '暂无数据集'" />
     </el-card>
 
     <el-card shadow="never">

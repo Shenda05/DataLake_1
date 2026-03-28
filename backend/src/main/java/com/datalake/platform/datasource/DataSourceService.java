@@ -74,7 +74,9 @@ public class DataSourceService {
         jdbcTemplate.update(
             """
                 update data_source
-                set source_name=?,source_type=?,host=?,port=?,db_name=?,username=?,password=?,description=?,update_time=?
+                set source_name=?,source_type=?,host=?,port=?,db_name=?,username=?,
+                    password=coalesce(nullif(?, ''), password),
+                    description=?,update_time=?
                 where source_id=?
             """,
             body.sourceName(),
@@ -85,6 +87,17 @@ public class DataSourceService {
             body.username(),
             body.password(),
             body.description(),
+            now(),
+            sourceId
+        );
+        return get(sourceId);
+    }
+
+    public DataSourceRecord updateStatus(Long sourceId, String status) {
+        String normalizedStatus = normalizeSourceStatus(status);
+        jdbcTemplate.update(
+            "update data_source set status = ?, update_time = ? where source_id = ?",
+            normalizedStatus,
             now(),
             sourceId
         );
@@ -187,6 +200,17 @@ public class DataSourceService {
 
     private Timestamp now() {
         return Timestamp.from(java.time.Instant.now());
+    }
+
+    private String normalizeSourceStatus(String status) {
+        if (status == null || status.isBlank()) {
+            throw new IllegalArgumentException("status 不能为空");
+        }
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        if (!List.of("ENABLED", "DISABLED").contains(normalized)) {
+            throw new IllegalArgumentException("数据源状态仅支持 ENABLED 或 DISABLED");
+        }
+        return normalized;
     }
 
     public record DataSourceRecord(

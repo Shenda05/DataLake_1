@@ -26,7 +26,7 @@ export type DataSource = {
   port?: number | null;
   dbName?: string | null;
   username?: string | null;
-  status: string;
+  status: 'ENABLED' | 'DISABLED' | string;
   description?: string | null;
 };
 
@@ -39,6 +39,8 @@ export type ImportHistory = {
   status: string;
   recordCount: number;
   errorMessage?: string | null;
+  createUser?: number | null;
+  operatorName?: string | null;
   createTime: string;
 };
 
@@ -54,7 +56,11 @@ export type ImportDetail = {
   recordCount: number;
   errorMessage?: string | null;
   createUser?: number | null;
+  operatorName?: string | null;
+  sourceName?: string | null;
+  sourceType?: string | null;
   createTime: string;
+  importParams?: Record<string, unknown>;
 };
 
 export type DatabaseTableOption = {
@@ -315,6 +321,10 @@ export function updateDataSource(sourceId: number, payload: Partial<DataSource> 
   return apiPut<DataSource>(`/data-sources/${sourceId}`, payload);
 }
 
+export function updateDataSourceStatus(sourceId: number, status: 'ENABLED' | 'DISABLED') {
+  return apiPost<DataSource>(`/data-sources/${sourceId}/status`, { status });
+}
+
 export function deleteDataSource(sourceId: number) {
   return apiDelete<void>(`/data-sources/${sourceId}`);
 }
@@ -362,16 +372,26 @@ export function previewDatabaseTable(sourceId: number, tableName: string, schema
   return apiGet<DatabasePreview>('/imports/database/preview', { sourceId, schemaName, tableName, limit });
 }
 
-export function listImportHistory() {
-  return apiGet<ImportHistory[]>('/imports/history');
+export function listImportHistory(params?: {
+  businessDomain?: BusinessDomain;
+  status?: string;
+  startTime?: string;
+  endTime?: string;
+}) {
+  return apiGet<ImportHistory[]>('/imports/history', params);
 }
 
 export function getImportDetail(importId: number) {
   return apiGet<ImportDetail>(`/imports/${importId}`);
 }
 
-export function listDatasets() {
-  return apiGet<DatasetSummary[]>('/datasets');
+export function listDatasets(params?: {
+  keyword?: string;
+  sourceId?: number;
+  status?: string;
+  businessDomain?: BusinessDomain;
+}) {
+  return apiGet<DatasetSummary[]>('/datasets', params);
 }
 
 export function getDatasetDetail(datasetId: number) {

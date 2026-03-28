@@ -47,6 +47,11 @@ const fileForm = reactive({
   datasetName: '',
   businessDomain: 'TRADE' as BusinessDomain
 });
+const historyFilters = reactive({
+  businessDomain: '' as '' | BusinessDomain,
+  status: '' as '' | 'SUCCESS' | 'FAILED',
+  timeRange: [] as string[]
+});
 const databaseForm = reactive({
   sourceId: undefined as number | undefined,
   schemaName: '',
@@ -60,16 +65,13 @@ const adminDatabaseSources = computed(() => dataSources.value.filter((item) => i
 const fileSources = computed(() => dataSources.value.filter((item) => item.sourceType === 'FILE' || item.sourceType === 'MYSQL'));
 const previewColumns = computed(() => databasePreview.value?.columns ?? []);
 const canImportDatabase = computed(() => authStore.hasAction('import.database'));
+const selectedImportParamsText = computed(() => JSON.stringify(selectedImportDetail.value?.importParams || {}, null, 2));
 
 async function loadBaseData() {
   dataSources.value = await listDataSources();
-  history.value = await listImportHistory();
+  await loadHistory();
   const routeImportId = readRouteImportId();
-  if (
-    routeImportId &&
-    history.value.some((item) => item.importId === routeImportId) &&
-    selectedImportDetail.value?.importId !== routeImportId
-  ) {
+  if (routeImportId && selectedImportDetail.value?.importId !== routeImportId) {
     await openImportDetail(routeImportId);
   }
   if (!fileForm.sourceId && fileSources.value.length > 0) {
@@ -83,6 +85,15 @@ async function loadBaseData() {
   if (canImportDatabase.value && databaseForm.sourceId) {
     await loadDatabaseTables();
   }
+}
+
+async function loadHistory() {
+  history.value = await listImportHistory({
+    businessDomain: historyFilters.businessDomain || undefined,
+    status: historyFilters.status || undefined,
+    startTime: historyFilters.timeRange[0] || undefined,
+    endTime: historyFilters.timeRange[1] || undefined
+  });
 }
 
 function onFileChange(event: Event) {
@@ -106,7 +117,7 @@ async function submitFileImport() {
     ElMessage.success(`导入成功，生成数据集 ${result.datasetName}`);
     fileForm.datasetName = '';
     selectedFile.value = null;
-    history.value = await listImportHistory();
+    await loadHistory();
   } catch (error) {
     ElMessage.error(`导入失败: ${(error as Error).message}`);
   } finally {
@@ -157,6 +168,21 @@ async function openImportDetail(importId: number) {
 
 function handleHistoryDetail(row: ImportHistory) {
   void openImportDetail(row.importId);
+}
+
+async function applyHistoryFilters() {
+  try {
+    await loadHistory();
+  } catch (error) {
+    ElMessage.error(`导入历史筛选失败: ${(error as Error).message}`);
+  }
+}
+
+async function resetHistoryFilters() {
+  historyFilters.businessDomain = '';
+  historyFilters.status = '';
+  historyFilters.timeRange = [];
+  await applyHistoryFilters();
 }
 
 async function loadDatabaseTables() {
@@ -234,7 +260,7 @@ async function submitDatabaseImport() {
     ElMessage.success(`数据库表导入成功，生成数据集 ${result.datasetName}`);
     databaseForm.datasetName = '';
     databaseForm.description = '';
-    history.value = await listImportHistory();
+    await loadHistory();
   } catch (error) {
     ElMessage.error(`数据库表导入失败: ${(error as Error).message}`);
   } finally {
@@ -285,9 +311,7 @@ watch(
     if (!importId || selectedImportDetail.value?.importId === importId) {
       return;
     }
-    if (history.value.some((item) => item.importId === importId)) {
-      void openImportDetail(importId);
-    }
+    void openImportDetail(importId);
   }
 );
 
@@ -444,9 +468,40 @@ onMounted(async () => {
       <template #header>
         <div class="card-header">
           <span>导入历史</span>
-          <el-button link type="primary" @click="loadBaseData">刷新</el-button>
+          <el-button link type="primary" @click="loadHistory">刷新</el-button>
         </div>
       </template>
+      <el-form inline class="notice-box">
+        <el-form-item label="业务域">
+          <el-select v-model="historyFilters.businessDomain" clearable placeholder="全部业务域">
+            <el-option
+              v-for="domain in BUSINESS_DOMAIN_OPTIONS"
+              :key="domain.value"
+              :label="domain.label"
+              :value="domain.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="historyFilters.status" clearable placeholder="全部状态">
+            <el-option label="SUCCESS" value="SUCCESS" />
+            <el-option label="FAILED" value="FAILED" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="historyFilters.timeRange"
+            type="daterange"
+            value-format="YYYY-MM-DD"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="applyHistoryFilters">筛选</el-button>
+          <el-button @click="resetHistoryFilters">重置</el-button>
+        </el-form-item>
+      </el-form>
       <el-table :data="history" stripe>
         <el-table-column prop="importId" label="导入编号" width="100" />
         <el-table-column prop="datasetName" label="数据集" />
@@ -454,6 +509,7 @@ onMounted(async () => {
         <el-table-column prop="formatType" label="格式" width="120" />
         <el-table-column prop="recordCount" label="记录数" width="100" />
         <el-table-column prop="status" label="状态" width="120" />
+        <el-table-column prop="operatorName" label="操作人" width="120" />
         <el-table-column prop="errorMessage" label="错误信息" />
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
@@ -471,13 +527,24 @@ onMounted(async () => {
           <el-descriptions-item label="业务域">{{ selectedImportDetail.businessDomain }}</el-descriptions-item>
           <el-descriptions-item label="格式">{{ selectedImportDetail.formatType }}</el-descriptions-item>
           <el-descriptions-item label="来源数据源">{{ resolveSourceLabel(selectedImportDetail.sourceId) }}</el-descriptions-item>
+          <el-descriptions-item label="数据源类型">{{ selectedImportDetail.sourceType || '-' }}</el-descriptions-item>
           <el-descriptions-item label="来源文件/表">{{ resolveOriginLabel(selectedImportDetail) }}</el-descriptions-item>
           <el-descriptions-item label="记录数">{{ selectedImportDetail.recordCount }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ selectedImportDetail.status }}</el-descriptions-item>
+          <el-descriptions-item label="操作人">{{ selectedImportDetail.operatorName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="错误信息">{{ selectedImportDetail.errorMessage || '-' }}</el-descriptions-item>
           <el-descriptions-item label="创建时间">{{ selectedImportDetail.createTime }}</el-descriptions-item>
         </el-descriptions>
-        <el-empty v-else description="暂无导入详情" />
+        <el-card v-if="Object.keys(selectedImportDetail?.importParams || {}).length" shadow="never">
+          <template #header>
+            <div class="card-header">
+              <span>导入参数摘要</span>
+              <el-tag type="info">{{ Object.keys(selectedImportDetail?.importParams || {}).length }} 项</el-tag>
+            </div>
+          </template>
+          <pre>{{ selectedImportParamsText }}</pre>
+        </el-card>
+        <el-empty v-if="!selectedImportDetail" description="暂无导入详情" />
       </div>
     </el-drawer>
   </div>

@@ -24,8 +24,14 @@ public class DatasetController {
     }
 
     @GetMapping("/api/datasets")
-    public ApiResponse<?> list(HttpServletRequest request) {
-        return ApiResponse.success(datasetService.list(), requestId(request));
+    public ApiResponse<?> list(
+        @RequestParam(required = false) String keyword,
+        @RequestParam(required = false) Long sourceId,
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) String businessDomain,
+        HttpServletRequest request
+    ) {
+        return ApiResponse.success(datasetService.list(keyword, sourceId, status, businessDomain), requestId(request));
     }
 
     @GetMapping("/api/datasets/{datasetId}")

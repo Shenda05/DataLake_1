@@ -10,6 +10,7 @@ import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -101,12 +102,37 @@ public class DatasetService {
     }
 
     public List<DatasetSummary> list() {
-        return jdbcTemplate.query(
+        return list(null, null, null, null);
+    }
+
+    public List<DatasetSummary> list(String keyword, Long sourceId, String status, String businessDomain) {
+        StringBuilder sql = new StringBuilder(
             """
                 select dataset_id,source_id,dataset_name,business_domain,format_type,record_count,field_count,status,creator,physical_table_name
                 from data_set
-                order by dataset_id desc
-            """,
+                where 1 = 1
+            """
+        );
+        List<Object> args = new ArrayList<>();
+        if (keyword != null && !keyword.isBlank()) {
+            sql.append(" and lower(dataset_name) like ?");
+            args.add("%" + keyword.trim().toLowerCase(Locale.ROOT) + "%");
+        }
+        if (sourceId != null) {
+            sql.append(" and source_id = ?");
+            args.add(sourceId);
+        }
+        if (status != null && !status.isBlank()) {
+            sql.append(" and status = ?");
+            args.add(status.trim().toUpperCase(Locale.ROOT));
+        }
+        if (businessDomain != null && !businessDomain.isBlank()) {
+            sql.append(" and business_domain = ?");
+            args.add(BusinessDomainCatalog.normalize(businessDomain));
+        }
+        sql.append(" order by dataset_id desc");
+        return jdbcTemplate.query(
+            sql.toString(),
             (rs, rowNum) -> new DatasetSummary(
                 rs.getLong("dataset_id"),
                 (Long) rs.getObject("source_id"),
@@ -118,7 +144,8 @@ public class DatasetService {
                 rs.getString("status"),
                 (Long) rs.getObject("creator"),
                 rs.getString("physical_table_name")
-            )
+            ),
+            args.toArray()
         );
     }
 

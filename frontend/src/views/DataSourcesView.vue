@@ -1,12 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { isAuthExpiredError } from '../api/client';
-import { createDataSource, deleteDataSource, listDataSources, testDataSource, type DataSource } from '../api/platform';
+import {
+  createDataSource,
+  deleteDataSource,
+  listDataSources,
+  testDataSource,
+  updateDataSource,
+  updateDataSourceStatus,
+  type DataSource
+} from '../api/platform';
 import { useAuthStore } from '../stores/auth';
 
 const authStore = useAuthStore();
 const dataSources = ref<DataSource[]>([]);
+const editingSourceId = ref<number | null>(null);
 const form = reactive({
   sourceName: '',
   sourceType: 'FILE',
@@ -18,6 +27,20 @@ const form = reactive({
   description: ''
 });
 const canManageSources = computed(() => authStore.hasAction('source.manage'));
+
+function resetForm() {
+  editingSourceId.value = null;
+  Object.assign(form, {
+    sourceName: '',
+    sourceType: 'FILE',
+    host: '',
+    port: undefined,
+    dbName: '',
+    username: '',
+    password: '',
+    description: ''
+  });
+}
 
 async function loadData() {
   dataSources.value = await listDataSources();
@@ -33,13 +56,36 @@ async function submit() {
     return;
   }
   try {
-    await createDataSource(form);
-    ElMessage.success('数据源创建成功');
-    Object.assign(form, { sourceName: '', sourceType: 'FILE', host: '', port: undefined, dbName: '', username: '', password: '', description: '' });
+    if (editingSourceId.value) {
+      await updateDataSource(editingSourceId.value, form);
+      ElMessage.success('数据源更新成功');
+    } else {
+      await createDataSource(form);
+      ElMessage.success('数据源创建成功');
+    }
+    resetForm();
     await loadData();
   } catch (error) {
-    ElMessage.error(`创建失败: ${(error as Error).message}`);
+    ElMessage.error(`保存失败: ${(error as Error).message}`);
   }
+}
+
+function handleEdit(source: DataSource) {
+  if (!canManageSources.value) {
+    ElMessage.warning('当前角色没有数据源管理权限');
+    return;
+  }
+  editingSourceId.value = source.sourceId;
+  Object.assign(form, {
+    sourceName: source.sourceName || '',
+    sourceType: source.sourceType || 'FILE',
+    host: source.host || '',
+    port: source.port || undefined,
+    dbName: source.dbName || '',
+    username: source.username || '',
+    password: '',
+    description: source.description || ''
+  });
 }
 
 async function handleTest(sourceId: number) {
@@ -52,6 +98,25 @@ async function handleTest(sourceId: number) {
     ElMessage.success(result.message);
   } catch (error) {
     ElMessage.error(`测试失败: ${(error as Error).message}`);
+  }
+}
+
+async function handleToggleStatus(source: DataSource) {
+  if (!canManageSources.value) {
+    ElMessage.warning('当前角色没有数据源管理权限');
+    return;
+  }
+  const nextStatus = source.status === 'ENABLED' ? 'DISABLED' : 'ENABLED';
+  const actionText = nextStatus === 'ENABLED' ? '启用' : '停用';
+  try {
+    await ElMessageBox.confirm(`确定${actionText}数据源「${source.sourceName}」吗？`, '状态确认', { type: 'warning' });
+    await updateDataSourceStatus(source.sourceId, nextStatus);
+    ElMessage.success(`数据源已${actionText}`);
+    await loadData();
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(`状态更新失败: ${(error as Error).message}`);
+    }
   }
 }
 
@@ -86,7 +151,7 @@ onMounted(async () => {
     <el-card v-if="canManageSources" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>新增数据源</span>
+          <span>{{ editingSourceId ? '编辑数据源' : '新增数据源' }}</span>
           <el-tag type="success">Real API</el-tag>
         </div>
       </template>
@@ -113,12 +178,15 @@ onMounted(async () => {
           <el-input v-model="form.username" />
         </el-form-item>
         <el-form-item label="密码">
-          <el-input v-model="form.password" show-password />
+          <el-input v-model="form.password" show-password :placeholder="editingSourceId ? '留空则保留原密码' : ''" />
         </el-form-item>
         <el-form-item label="说明">
           <el-input v-model="form.description" type="textarea" :rows="3" />
         </el-form-item>
-        <el-button type="primary" @click="submit">创建数据源</el-button>
+        <div class="card-header-actions">
+          <el-button type="primary" @click="submit">{{ editingSourceId ? '保存修改' : '创建数据源' }}</el-button>
+          <el-button v-if="editingSourceId" @click="resetForm">取消编辑</el-button>
+        </div>
       </el-form>
     </el-card>
 
@@ -138,8 +206,17 @@ onMounted(async () => {
         <el-table-column prop="sourceType" label="类型" width="120" />
         <el-table-column prop="status" label="状态" width="120" />
         <el-table-column prop="description" label="说明" />
-        <el-table-column label="操作" width="220">
+        <el-table-column label="操作" width="320">
           <template #default="{ row }">
+            <el-button v-if="canManageSources" link type="primary" @click="handleEdit(row)">编辑</el-button>
+            <el-button
+              v-if="canManageSources"
+              link
+              :type="row.status === 'ENABLED' ? 'warning' : 'success'"
+              @click="handleToggleStatus(row)"
+            >
+              {{ row.status === 'ENABLED' ? '停用' : '启用' }}
+            </el-button>
             <el-button v-if="canManageSources" link type="success" @click="handleTest(row.sourceId)">测试连接</el-button>
             <el-button v-if="canManageSources" link type="danger" @click="handleDelete(row.sourceId)">删除</el-button>
             <span v-if="!canManageSources" class="inline-tip">仅查看</span>
