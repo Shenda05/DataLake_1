@@ -3,6 +3,7 @@ package com.datalake.platform.dataset;
 import com.datalake.platform.common.web.PageResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -15,6 +16,8 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class QueryAnalysisService {
+
+    private static final int MAX_ANALYSIS_ROWS = 20_000;
 
     private final DatasetService datasetService;
     private final DatasetTableService datasetTableService;
@@ -35,38 +38,81 @@ public class QueryAnalysisService {
 
     public PageResponse<Map<String, Object>> filter(FilterQueryRequest body) {
         DatasetService.DatasetDetail dataset = datasetService.detail(body.datasetId());
-        List<FilterCondition> filters = List.of(new FilterCondition(body.field(), body.operator(), body.value()));
+        List<DatasetService.MetaFieldRecord> metadata = datasetService.metadata(body.datasetId());
+        List<FilterCondition> filters = normalizeFilterConditions(body);
+        if (filters.isEmpty()) {
+            throw new IllegalArgumentException("请至少提供一个查询条件");
+        }
         return datasetTableService.filter(
             dataset.physicalTableName(),
-            datasetService.metadata(body.datasetId()),
+            metadata,
             filters,
-            body.pageNum() == null ? 1 : body.pageNum(),
-            body.pageSize() == null ? 10 : body.pageSize()
+            normalizeLogic(body.logic()),
+            body.sortField(),
+            normalizeSortOrder(body.sortOrder()),
+            normalizePageNum(body.pageNum()),
+            normalizePageSize(body.pageSize())
         );
     }
 
     public List<Map<String, Object>> sql(SqlQueryRequest body) {
         DatasetService.DatasetDetail dataset = datasetService.detail(body.datasetId());
-        String sql = normalizeSql(dataset, body.sql());
+        String sql = normalizeSql(dataset, body.sql(), 100);
         return datasetTableService.executeSql(sql);
     }
 
-    public TabularExportService.ExportedFile exportFilter(FilterQueryRequest body, String format) {
-        PageResponse<Map<String, Object>> response = filter(body);
-        List<Map<String, Object>> rows = response.records();
+    public PageResponse<Map<String, Object>> sqlPage(SqlPageQueryRequest body) {
         DatasetService.DatasetDetail dataset = datasetService.detail(body.datasetId());
-        List<String> headers = resolveHeaders(rows, datasetService.metadata(body.datasetId()).stream().map(DatasetService.MetaFieldRecord::fieldName).toList());
+        String sql = normalizeSql(dataset, body.sql(), null);
+        DatasetTableService.SqlExecutionResult result = datasetTableService.executeSqlWithColumns(sql);
+        List<Map<String, Object>> sortedRows = sortSqlRows(
+            result.rows(),
+            result.columns(),
+            body.sortField(),
+            normalizeSortOrder(body.sortOrder())
+        );
+        int pageNum = normalizePageNum(body.pageNum());
+        int pageSize = normalizePageSize(body.pageSize());
+        int fromIndex = Math.max(pageNum - 1, 0) * pageSize;
+        int total = sortedRows.size();
+        if (fromIndex >= total) {
+            return new PageResponse<>(pageNum, pageSize, total, List.of());
+        }
+        int toIndex = Math.min(fromIndex + pageSize, total);
+        return new PageResponse<>(pageNum, pageSize, total, sortedRows.subList(fromIndex, toIndex));
+    }
+
+    public TabularExportService.ExportedFile exportFilter(FilterQueryRequest body, String format) {
+        DatasetService.DatasetDetail dataset = datasetService.detail(body.datasetId());
+        List<DatasetService.MetaFieldRecord> metadata = datasetService.metadata(body.datasetId());
+        List<Map<String, Object>> rows;
+        String exportScope = normalizeExportScope(body.exportScope());
+        if ("ALL".equals(exportScope)) {
+            rows = loadRowsWithOptionalFilters(
+                dataset,
+                metadata,
+                normalizeFilterConditions(body),
+                body.logic(),
+                body.sortField(),
+                body.sortOrder(),
+                MAX_ANALYSIS_ROWS,
+                "导出数据"
+            );
+        } else {
+            rows = filter(body).records();
+        }
+        List<String> headers = resolveHeaders(rows, metadata.stream().map(DatasetService.MetaFieldRecord::fieldName).toList());
         return tabularExportService.export(dataset.datasetName() + "_filter_result", headers, rows, format);
     }
 
     public TabularExportService.ExportedFile exportSql(SqlQueryRequest body, String format) {
         DatasetService.DatasetDetail dataset = datasetService.detail(body.datasetId());
-        List<Map<String, Object>> rows = datasetTableService.executeSql(normalizeSql(dataset, body.sql()));
+        List<Map<String, Object>> rows = datasetTableService.executeSql(normalizeSql(dataset, body.sql(), 100));
         List<String> headers = resolveHeaders(rows, List.of());
         return tabularExportService.export(dataset.datasetName() + "_sql_result", headers, rows, format);
     }
 
-    private String normalizeSql(DatasetService.DatasetDetail dataset, String rawSql) {
+    private String normalizeSql(DatasetService.DatasetDetail dataset, String rawSql, Integer defaultLimit) {
         String sql = rawSql.trim();
         String lower = sql.toLowerCase(Locale.ROOT);
         if (!lower.startsWith("select")) {
@@ -82,8 +128,8 @@ public class QueryAnalysisService {
         if (!lower.contains("from " + dataset.physicalTableName().toLowerCase(Locale.ROOT))) {
             throw new IllegalArgumentException("SQL 只能查询当前数据集对应的单表");
         }
-        if (!lower.contains(" limit ")) {
-            sql = sql + " limit 100";
+        if (defaultLimit != null && defaultLimit > 0 && !lower.contains(" limit ")) {
+            sql = sql + " limit " + defaultLimit;
         }
         return sql;
     }
@@ -93,6 +139,155 @@ public class QueryAnalysisService {
             return new ArrayList<>(rows.get(0).keySet());
         }
         return fallbackHeaders;
+    }
+
+    private List<FilterCondition> normalizeFilterConditions(FilterQueryRequest body) {
+        if (body.conditions() != null && !body.conditions().isEmpty()) {
+            return body.conditions().stream()
+                .filter(condition -> condition != null)
+                .map(condition -> new FilterCondition(
+                    condition.field(),
+                    condition.operator(),
+                    condition.value(),
+                    condition.valueTo()
+                ))
+                .toList();
+        }
+        if (body.field() == null || body.field().isBlank()) {
+            return List.of();
+        }
+        return List.of(new FilterCondition(body.field(), body.operator(), body.value(), body.valueTo()));
+    }
+
+    private String normalizeLogic(String logic) {
+        return "OR".equalsIgnoreCase(logic) ? "OR" : "AND";
+    }
+
+    private String normalizeSortOrder(String sortOrder) {
+        return "DESC".equalsIgnoreCase(sortOrder) ? "DESC" : "ASC";
+    }
+
+    private int normalizePageNum(Integer pageNum) {
+        return pageNum == null ? 1 : Math.max(1, pageNum);
+    }
+
+    private int normalizePageSize(Integer pageSize) {
+        if (pageSize == null) {
+            return 20;
+        }
+        return Math.max(1, Math.min(pageSize, 200));
+    }
+
+    private String normalizeExportScope(String exportScope) {
+        return "ALL".equalsIgnoreCase(exportScope) ? "ALL" : "PAGE";
+    }
+
+    private List<Map<String, Object>> sortSqlRows(
+        List<Map<String, Object>> rows,
+        List<String> columns,
+        String sortField,
+        String sortOrder
+    ) {
+        if (sortField == null || sortField.isBlank()) {
+            return new ArrayList<>(rows);
+        }
+        String resolvedSortField = resolveSqlSortField(columns, sortField);
+        Comparator<Map<String, Object>> comparator = (left, right) -> compareSortValues(
+            left.get(resolvedSortField),
+            right.get(resolvedSortField)
+        );
+        if ("DESC".equalsIgnoreCase(sortOrder)) {
+            comparator = comparator.reversed();
+        }
+        List<Map<String, Object>> sorted = new ArrayList<>(rows);
+        sorted.sort(comparator);
+        return sorted;
+    }
+
+    private String resolveSqlSortField(List<String> columns, String sortField) {
+        for (String column : columns) {
+            if (column.equalsIgnoreCase(sortField.trim())) {
+                return column;
+            }
+        }
+        throw new IllegalArgumentException("SQL 排序字段不存在: " + sortField);
+    }
+
+    private int compareSortValues(Object left, Object right) {
+        if (left == right) {
+            return 0;
+        }
+        if (left == null) {
+            return -1;
+        }
+        if (right == null) {
+            return 1;
+        }
+        if (left instanceof Number leftNumber && right instanceof Number rightNumber) {
+            return Double.compare(leftNumber.doubleValue(), rightNumber.doubleValue());
+        }
+        LocalDateTime leftDateTime = toDateTime(left);
+        LocalDateTime rightDateTime = toDateTime(right);
+        if (leftDateTime != null && rightDateTime != null) {
+            return leftDateTime.compareTo(rightDateTime);
+        }
+        Double leftNumeric = toNumeric(left);
+        Double rightNumeric = toNumeric(right);
+        if (leftNumeric != null && rightNumeric != null) {
+            return Double.compare(leftNumeric, rightNumeric);
+        }
+        return String.valueOf(left).compareToIgnoreCase(String.valueOf(right));
+    }
+
+    private Double toNumeric(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isBlank()) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(text);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private LocalDateTime toDateTime(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof java.sql.Timestamp timestamp) {
+            return timestamp.toLocalDateTime();
+        }
+        if (value instanceof java.sql.Date date) {
+            return date.toLocalDate().atStartOfDay();
+        }
+        if (value instanceof java.time.LocalDate localDate) {
+            return localDate.atStartOfDay();
+        }
+        if (value instanceof java.time.LocalDateTime localDateTime) {
+            return localDateTime;
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(text);
+        } catch (Exception ignored) {
+        }
+        if (text.length() >= 10) {
+            try {
+                return LocalDate.parse(text.substring(0, 10)).atStartOfDay();
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
     }
 
     public SummaryResponse summary(Long datasetId) {
@@ -121,25 +316,71 @@ public class QueryAnalysisService {
             .toList();
     }
 
+    public List<ChartPoint> charts(ChartQueryRequest request) {
+        DatasetService.DatasetDetail dataset = datasetService.detail(request.datasetId());
+        List<DatasetService.MetaFieldRecord> metadata = datasetService.metadata(request.datasetId());
+        if (metadata.isEmpty()) {
+            return List.of();
+        }
+        String dimensionField = resolveChartDimensionField(metadata, request.dimensionField());
+        List<Map<String, Object>> rows = loadRowsWithOptionalFilters(
+            dataset,
+            metadata,
+            normalizeMetricConditions(request.conditions()),
+            request.logic(),
+            null,
+            "ASC",
+            MAX_ANALYSIS_ROWS,
+            "图表统计"
+        );
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        return rows.stream()
+            .collect(java.util.stream.Collectors.groupingBy(
+                row -> normalizeDimensionValue(row.get(dimensionField)),
+                LinkedHashMap::new,
+                java.util.stream.Collectors.counting()
+            ))
+            .entrySet()
+            .stream()
+            .sorted(Map.Entry.<String, Long>comparingByValue(Comparator.reverseOrder()))
+            .limit(10)
+            .map(entry -> new ChartPoint(entry.getKey(), entry.getValue().intValue()))
+            .toList();
+    }
+
     // [已改造完成] 电商指标聚合接口
     public EcommerceMetricResponse ecommerceMetric(EcommerceMetricRequest request) {
         DatasetService.DatasetDetail dataset = datasetService.detail(request.datasetId());
         List<DatasetService.MetaFieldRecord> metadata = datasetService.metadata(request.datasetId());
-        List<Map<String, Object>> rows = datasetTableService.fetchAll(dataset.physicalTableName(), metadata, null, null);
+        List<FilterCondition> filters = normalizeMetricConditions(request.conditions());
+        List<Map<String, Object>> rows = loadRowsWithOptionalFilters(
+            dataset,
+            metadata,
+            filters,
+            request.logic(),
+            null,
+            "ASC",
+            MAX_ANALYSIS_ROWS,
+            "电商指标"
+        );
         Map<String, String> fieldMap = buildFieldMap(metadata);
         String metricType = request.metricType() == null ? "ORDER_TREND" : request.metricType().toUpperCase(Locale.ROOT);
 
         return switch (metricType) {
             case "ORDER_TREND" -> {
                 String timeField = requiredField(resolveField(fieldMap, request.timeField(), List.of("order_time", "order_date", "created_at", "create_time")), "订单时间");
-                List<MetricPoint> trend = aggregateByDate(rows, timeField, null, 7);
-                yield new EcommerceMetricResponse(metricType, trend, toTableRows(trend), "按订单日期统计近 7 天订单量趋势");
+                DateRange range = resolveDateRange(filters, timeField);
+                List<MetricPoint> trend = aggregateByDate(rows, timeField, null, range.start(), range.end(), 7);
+                yield new EcommerceMetricResponse(metricType, trend, toTableRows(trend), buildTrendDescription("订单量趋势", range));
             }
             case "SALES_TREND" -> {
                 String timeField = requiredField(resolveField(fieldMap, request.timeField(), List.of("order_time", "order_date", "created_at", "create_time")), "订单时间");
                 String valueField = requiredField(resolveField(fieldMap, request.valueField(), List.of("amount", "total_amount", "payment_amount", "order_amount")), "销售额字段");
-                List<MetricPoint> trend = aggregateByDate(rows, timeField, valueField, 7);
-                yield new EcommerceMetricResponse(metricType, trend, toTableRows(trend), "按订单日期统计近 7 天销售额趋势");
+                DateRange range = resolveDateRange(filters, timeField);
+                List<MetricPoint> trend = aggregateByDate(rows, timeField, valueField, range.start(), range.end(), 7);
+                yield new EcommerceMetricResponse(metricType, trend, toTableRows(trend), buildTrendDescription("销售额趋势", range));
             }
             case "TOP_PRODUCTS" -> {
                 String productField = requiredField(resolveField(fieldMap, request.productField(), List.of("product_name", "sku_name", "product_id", "sku_id", "goods_name")), "商品字段");
@@ -156,7 +397,7 @@ public class QueryAnalysisService {
                 String stockField = requiredField(resolveField(fieldMap, request.valueField(), List.of("stock", "stock_qty", "inventory", "inventory_qty", "available_stock")), "库存字段");
                 double threshold = request.stockThreshold() == null ? 10D : request.stockThreshold();
                 List<MetricPoint> warning = aggregateLowStock(rows, stockField, threshold);
-                yield new EcommerceMetricResponse(metricType, warning, toTableRows(warning), "低库存预警视图");
+                yield new EcommerceMetricResponse(metricType, warning, toTableRows(warning), "低库存预警（库存≤" + threshold + "）");
             }
             default -> throw new IllegalArgumentException("不支持的电商指标类型: " + metricType);
         };
@@ -266,16 +507,35 @@ public class QueryAnalysisService {
         return fieldName;
     }
 
-    private List<MetricPoint> aggregateByDate(List<Map<String, Object>> rows, String timeField, String valueField, int days) {
+    private List<MetricPoint> aggregateByDate(
+        List<Map<String, Object>> rows,
+        String timeField,
+        String valueField,
+        LocalDate explicitStart,
+        LocalDate explicitEnd,
+        int fallbackDays
+    ) {
         LocalDate today = LocalDate.now();
-        LocalDate start = today.minusDays(Math.max(1, days) - 1L);
+        LocalDate start = explicitStart;
+        LocalDate end = explicitEnd;
+        if (start == null || end == null) {
+            end = today;
+            start = today.minusDays(Math.max(1, fallbackDays) - 1L);
+        }
+        if (start.isAfter(end)) {
+            LocalDate swapped = start;
+            start = end;
+            end = swapped;
+        }
         Map<LocalDate, Double> bucket = new TreeMap<>();
-        for (int i = 0; i < days; i++) {
-            bucket.put(start.plusDays(i), 0D);
+        LocalDate cursor = start;
+        while (!cursor.isAfter(end)) {
+            bucket.put(cursor, 0D);
+            cursor = cursor.plusDays(1);
         }
         for (Map<String, Object> row : rows) {
             LocalDate date = toDate(row.get(timeField));
-            if (date == null || date.isBefore(start) || date.isAfter(today)) {
+            if (date == null || date.isBefore(start) || date.isAfter(end)) {
                 continue;
             }
             double increment = valueField == null ? 1D : toDouble(row.get(valueField));
@@ -317,7 +577,10 @@ public class QueryAnalysisService {
                 warnings.add(new MetricPoint(key, stock));
             }
         }
-        return warnings.stream().limit(20).toList();
+        return warnings.stream()
+            .sorted(Comparator.comparingDouble(MetricPoint::value))
+            .limit(20)
+            .toList();
     }
 
     private List<Map<String, Object>> toTableRows(List<MetricPoint> points) {
@@ -472,6 +735,92 @@ public class QueryAnalysisService {
         }
     }
 
+    private String resolveChartDimensionField(List<DatasetService.MetaFieldRecord> metadata, String dimensionField) {
+        if (dimensionField == null || dimensionField.isBlank()) {
+            return metadata.get(0).fieldName();
+        }
+        return resolveDatasetField(metadata, dimensionField, "dimensionField");
+    }
+
+    private String normalizeDimensionValue(Object value) {
+        if (value == null) {
+            return "UNKNOWN";
+        }
+        String text = String.valueOf(value).trim();
+        return text.isBlank() ? "UNKNOWN" : text;
+    }
+
+    private List<FilterCondition> normalizeMetricConditions(List<FilterCondition> conditions) {
+        if (conditions == null || conditions.isEmpty()) {
+            return List.of();
+        }
+        return conditions.stream()
+            .filter(item -> item != null)
+            .filter(item -> item.field() != null && !item.field().isBlank())
+            .filter(item -> item.operator() != null && !item.operator().isBlank())
+            .toList();
+    }
+
+    private List<Map<String, Object>> loadRowsWithOptionalFilters(
+        DatasetService.DatasetDetail dataset,
+        List<DatasetService.MetaFieldRecord> metadata,
+        List<FilterCondition> filters,
+        String logic,
+        String sortField,
+        String sortOrder,
+        int limit,
+        String usageLabel
+    ) {
+        int safeLimit = Math.max(1, Math.min(limit, MAX_ANALYSIS_ROWS));
+        PageResponse<Map<String, Object>> page = filters == null || filters.isEmpty()
+            ? datasetTableService.preview(dataset.physicalTableName(), metadata, 1, safeLimit)
+            : datasetTableService.filter(
+                dataset.physicalTableName(),
+                metadata,
+                filters,
+                normalizeLogic(logic),
+                sortField,
+                normalizeSortOrder(sortOrder),
+                1,
+                safeLimit
+            );
+        if (page.total() > safeLimit) {
+            throw new IllegalArgumentException(usageLabel + "最多支持 " + safeLimit + " 条记录，请先收敛筛选条件");
+        }
+        return page.records();
+    }
+
+    private DateRange resolveDateRange(List<FilterCondition> conditions, String timeField) {
+        if (conditions == null || conditions.isEmpty()) {
+            return DateRange.EMPTY;
+        }
+        for (FilterCondition condition : conditions) {
+            if (condition == null || condition.field() == null || condition.operator() == null) {
+                continue;
+            }
+            String operator = condition.operator().toUpperCase(Locale.ROOT);
+            if (!"TIME_RANGE".equals(operator) && !"BETWEEN".equals(operator)) {
+                continue;
+            }
+            if (!condition.field().equalsIgnoreCase(timeField)) {
+                continue;
+            }
+            LocalDate start = toDate(condition.value());
+            LocalDate end = toDate(condition.valueTo());
+            if (start != null && end != null) {
+                return new DateRange(start, end);
+            }
+        }
+        return DateRange.EMPTY;
+    }
+
+    private String buildTrendDescription(String metricName, DateRange range) {
+        if (range.start() != null && range.end() != null) {
+            return metricName + "（" + range.start() + " ~ " + range.end() + "）";
+        }
+        return metricName + "（近 7 天）";
+    }
+
     private IntegrationComputation computeIntegration(IntegrationQueryRequest request) {
         DatasetService.DatasetDetail leftDataset = datasetService.detail(request.leftDatasetId());
         DatasetService.DatasetDetail rightDataset = datasetService.detail(request.rightDatasetId());
@@ -602,13 +951,36 @@ public class QueryAnalysisService {
         return "STRING";
     }
 
-    public record FilterCondition(String field, String operator, String value) {
+    public record FilterCondition(String field, String operator, String value, String valueTo) {
     }
 
-    public record FilterQueryRequest(Long datasetId, String field, String operator, String value, Integer pageNum, Integer pageSize) {
+    public record FilterQueryRequest(
+        Long datasetId,
+        String field,
+        String operator,
+        String value,
+        String valueTo,
+        List<FilterCondition> conditions,
+        String logic,
+        String sortField,
+        String sortOrder,
+        Integer pageNum,
+        Integer pageSize,
+        String exportScope
+    ) {
     }
 
     public record SqlQueryRequest(Long datasetId, String sql) {
+    }
+
+    public record SqlPageQueryRequest(
+        Long datasetId,
+        String sql,
+        String sortField,
+        String sortOrder,
+        Integer pageNum,
+        Integer pageSize
+    ) {
     }
 
     public record EcommerceMetricRequest(
@@ -619,7 +991,17 @@ public class QueryAnalysisService {
         String categoryField,
         String productField,
         String quantityField,
-        Double stockThreshold
+        Double stockThreshold,
+        List<FilterCondition> conditions,
+        String logic
+    ) {
+    }
+
+    public record ChartQueryRequest(
+        Long datasetId,
+        String dimensionField,
+        List<FilterCondition> conditions,
+        String logic
     ) {
     }
 
@@ -688,5 +1070,9 @@ public class QueryAnalysisService {
         DatasetService.DatasetDetail leftDataset,
         DatasetService.DatasetDetail rightDataset
     ) {
+    }
+
+    private record DateRange(LocalDate start, LocalDate end) {
+        private static final DateRange EMPTY = new DateRange(null, null);
     }
 }

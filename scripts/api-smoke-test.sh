@@ -55,10 +55,10 @@ tmp_csv="$(mktemp /tmp/data-lake-smoke.XXXXXX.csv)"
 trap 'rm -f "$tmp_csv"' EXIT
 
 cat > "$tmp_csv" <<'CSV'
-industry,score,city
-智能制造,91,上海
-人工智能,95,深圳
-生物医药,88,苏州
+industry,score,city,order_time
+智能制造,91,上海,2026-03-05 10:00:00
+人工智能,95,深圳,2026-03-12 09:30:00
+生物医药,88,苏州,2026-02-25 08:10:00
 CSV
 
 echo "[1/8] 登录管理员账号"
@@ -82,8 +82,14 @@ import_id="$(json_get "$import_response" "data.importId")"
 echo "[4/8] 执行条件查询与 SQL 查询"
 filter_response="$(request POST "${BASE_URL}/queries/filter" "{\"datasetId\":${dataset_id},\"field\":\"industry\",\"operator\":\"LIKE\",\"value\":\"智能\",\"pageNum\":1,\"pageSize\":20}")"
 check_success "$filter_response" "条件查询"
+multi_filter_response="$(request POST "${BASE_URL}/queries/filter" "{\"datasetId\":${dataset_id},\"logic\":\"OR\",\"conditions\":[{\"field\":\"industry\",\"operator\":\"EQ\",\"value\":\"人工智能\"},{\"field\":\"score\",\"operator\":\"GTE\",\"value\":\"90\"}],\"sortField\":\"score\",\"sortOrder\":\"DESC\",\"pageNum\":1,\"pageSize\":20}")"
+check_success "$multi_filter_response" "多条件组合查询"
+time_range_response="$(request POST "${BASE_URL}/queries/filter" "{\"datasetId\":${dataset_id},\"logic\":\"AND\",\"conditions\":[{\"field\":\"city\",\"operator\":\"LIKE\",\"value\":\"上\"},{\"field\":\"order_time\",\"operator\":\"TIME_RANGE\",\"value\":\"2026-03-01 00:00:00\",\"valueTo\":\"2026-03-31 23:59:59\"}],\"pageNum\":1,\"pageSize\":20}")"
+check_success "$time_range_response" "时间范围条件查询"
 sql_response="$(request POST "${BASE_URL}/queries/sql" "{\"datasetId\":${dataset_id},\"sql\":\"SELECT * FROM dataset LIMIT 20\"}")"
 check_success "$sql_response" "SQL 查询"
+sql_page_response="$(request POST "${BASE_URL}/queries/sql/page" "{\"datasetId\":${dataset_id},\"sql\":\"SELECT industry,score,city FROM dataset\",\"sortField\":\"score\",\"sortOrder\":\"DESC\",\"pageNum\":1,\"pageSize\":2}")"
+check_success "$sql_page_response" "SQL 分页排序查询"
 
 echo "[5/8] 创建治理流程"
 flow_name="smoke_flow_${timestamp}"

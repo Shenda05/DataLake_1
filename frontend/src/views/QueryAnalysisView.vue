@@ -8,18 +8,20 @@ import {
   exportFilterQuery,
   exportSqlQuery,
   filterQuery,
-  getAnalysisCharts,
   getAnalysisSummary,
   listDatasets,
   listMetadata,
+  queryAnalysisCharts,
   queryEcommerceMetric,
   queryIntegration,
   saveIntegrationResult,
   type BusinessDomain,
-  sqlQuery,
+  sqlQueryPage,
   type DatasetSummary,
   type IntegrationResponse,
-  type MetaField
+  type MetaField,
+  type QueryCondition,
+  type QueryOperator
 } from '../api/platform';
 import { useAuthStore } from '../stores/auth';
 
@@ -49,7 +51,26 @@ const resultColumns = computed(() => Object.keys(tableData.value[0] || {}));
 const metricColumns = computed(() => Object.keys(metricTable.value[0] || {}));
 const integrationColumns = computed(() => integrationResult.value?.columns || []);
 const canExportQuery = computed(() => authStore.hasAction('query.export'));
+const linkMetricWithQuery = ref(true);
+const metricTimeRange = ref<[string, string] | []>([]);
+const baseChartHint = ref('基础分布图（全量）');
 const lastQueryMode = ref<'FILTER' | 'SQL'>('FILTER');
+const resultPage = reactive({
+  pageNum: 1,
+  pageSize: 20,
+  total: 0
+});
+const sqlResultColumns = ref<string[]>([]);
+const filterOperators: Array<{ label: string; value: QueryOperator }> = [
+  { label: 'LIKE', value: 'LIKE' },
+  { label: 'EQ', value: 'EQ' },
+  { label: 'GT', value: 'GT' },
+  { label: 'GTE', value: 'GTE' },
+  { label: 'LT', value: 'LT' },
+  { label: 'LTE', value: 'LTE' },
+  { label: 'BETWEEN', value: 'BETWEEN' },
+  { label: 'TIME_RANGE', value: 'TIME_RANGE' }
+];
 const businessDomainOptions: Array<{ label: string; value: BusinessDomain }> = [
   { label: '用户域', value: 'USER' },
   { label: '商品域', value: 'PRODUCT' },
@@ -59,12 +80,30 @@ const businessDomainOptions: Array<{ label: string; value: BusinessDomain }> = [
   { label: '评价域', value: 'REVIEW' },
   { label: '行为日志域', value: 'BEHAVIOR_LOG' }
 ];
+type FilterConditionModel = {
+  field: string;
+  operator: QueryOperator;
+  value: string;
+  valueTo: string;
+};
+function createFilterCondition(defaultField = ''): FilterConditionModel {
+  return {
+    field: defaultField,
+    operator: 'LIKE',
+    value: '',
+    valueTo: ''
+  };
+}
 const form = reactive({
   datasetId: undefined as number | undefined,
-  field: '',
-  operator: 'LIKE',
-  value: '',
-  sql: 'SELECT * FROM dataset LIMIT 20'
+  conditions: [createFilterCondition()] as FilterConditionModel[],
+  logic: 'AND' as 'AND' | 'OR',
+  chartDimensionField: '',
+  sortField: '',
+  sortOrder: 'ASC' as 'ASC' | 'DESC',
+  sql: 'SELECT * FROM dataset LIMIT 20',
+  sqlSortField: '',
+  sqlSortOrder: 'ASC' as 'ASC' | 'DESC'
 });
 const metricForm = reactive({
   datasetId: undefined as number | undefined,
@@ -89,6 +128,23 @@ const integrationForm = reactive({
 // [旧通用版共用] 条件查询与 SQL 查询能力保留，仅在同页增加电商指标与集成子标签。
 let chart: echarts.ECharts | null = null;
 let metricChart: echarts.ECharts | null = null;
+
+const metricTemplateHint = computed(() => {
+  switch (metricForm.metricType) {
+    case 'ORDER_TREND':
+      return '订单量趋势：按时间聚合订单条数';
+    case 'SALES_TREND':
+      return '销售额趋势：按时间聚合销售金额';
+    case 'TOP_PRODUCTS':
+      return '热销商品排行：按销量/频次统计 Top5';
+    case 'LOW_STOCK':
+      return '库存预警：展示低于阈值的商品';
+    case 'CATEGORY_SHARE':
+      return '商品分类占比：按分类条数统计';
+    default:
+      return '';
+  }
+});
 
 async function renderChart() {
   await nextTick();
@@ -173,48 +229,220 @@ async function loadBaseData() {
 async function loadDatasetAnalysis() {
   if (!form.datasetId) return;
   metadata.value = await listMetadata(form.datasetId);
-  form.field = metadata.value[0]?.fieldName || '';
+  const defaultField = metadata.value[0]?.fieldName || '';
+  if (!form.conditions.length) {
+    form.conditions.push(createFilterCondition(defaultField));
+  }
+  for (const condition of form.conditions) {
+    if (!condition.field) {
+      condition.field = defaultField;
+    }
+  }
+  if (!form.sortField) {
+    form.sortField = defaultField;
+  }
+  if (!form.chartDimensionField) {
+    form.chartDimensionField = defaultField;
+  }
   summary.value = await getAnalysisSummary(form.datasetId);
-  chartData.value = await getAnalysisCharts(form.datasetId);
+  await refreshBaseChart();
+}
+
+function isRangeOperator(operator: QueryOperator) {
+  return operator === 'BETWEEN' || operator === 'TIME_RANGE';
+}
+
+function buildFilterConditions(): QueryCondition[] {
+  return form.conditions
+    .filter((condition) => condition.field && condition.operator)
+    .map((condition) => ({
+      field: condition.field,
+      operator: condition.operator,
+      value: condition.value,
+      valueTo: condition.valueTo || undefined
+    }))
+    .filter((condition) => {
+      if (isRangeOperator(condition.operator as QueryOperator)) {
+        return Boolean(condition.value && condition.valueTo);
+      }
+      return Boolean(condition.value);
+    });
+}
+
+function guessTimeField(datasetMeta: MetaField[]) {
+  const candidates = ['order_time', 'order_date', 'created_at', 'create_time'];
+  const lowered = new Map(datasetMeta.map((item) => [item.fieldName.toLowerCase(), item.fieldName]));
+  for (const candidate of candidates) {
+    const matched = lowered.get(candidate);
+    if (matched) {
+      return matched;
+    }
+  }
+  return '';
+}
+
+function upsertTimeRangeCondition(conditions: QueryCondition[], timeField: string, range: [string, string]) {
+  const [start, end] = range;
+  const next = conditions.filter(
+    (item) =>
+      !(
+        item.field.toLowerCase() === timeField.toLowerCase() &&
+        ['TIME_RANGE', 'BETWEEN'].includes(String(item.operator).toUpperCase())
+      )
+  );
+  next.push({
+    field: timeField,
+    operator: 'TIME_RANGE',
+    value: start,
+    valueTo: end
+  });
+  return next;
+}
+
+async function refreshBaseChart(conditions?: QueryCondition[]) {
+  if (!form.datasetId) return;
+  const appliedConditions = conditions ?? buildFilterConditions();
+  chartData.value = await queryAnalysisCharts({
+    datasetId: form.datasetId,
+    dimensionField: form.chartDimensionField || undefined,
+    conditions: appliedConditions,
+    logic: form.logic
+  });
+  baseChartHint.value = appliedConditions.length ? '当前筛选条件下分布图' : '基础分布图（全量）';
   await renderChart();
 }
 
-async function runFilterQuery() {
-  if (!form.datasetId || !form.field || !form.value) {
-    ElMessage.warning('请选择数据集并填写筛选条件');
+async function buildMetricQueryContext() {
+  let datasetId = metricForm.datasetId;
+  if (linkMetricWithQuery.value && form.datasetId) {
+    if (metricForm.datasetId !== form.datasetId) {
+      metricForm.datasetId = form.datasetId;
+      ElMessage.info('已联动为当前查询数据集');
+    }
+    datasetId = form.datasetId;
+  }
+  if (!datasetId) {
+    throw new Error('请选择数据集');
+  }
+  const targetMetadata =
+    datasetId === form.datasetId && metadata.value.length > 0
+      ? metadata.value
+      : await listMetadata(datasetId);
+  let conditions = linkMetricWithQuery.value ? buildFilterConditions() : [];
+  if (metricTimeRange.value.length === 2) {
+    const resolvedTimeField = (metricForm.timeField || guessTimeField(targetMetadata)).trim();
+    if (!resolvedTimeField) {
+      throw new Error('请先填写时间字段，或选择包含标准时间字段的数据集');
+    }
+    conditions = upsertTimeRangeCondition(conditions, resolvedTimeField, metricTimeRange.value as [string, string]);
+    if (!metricForm.timeField) {
+      metricForm.timeField = resolvedTimeField;
+    }
+  }
+  return {
+    datasetId,
+    conditions,
+    logic: linkMetricWithQuery.value ? form.logic : 'AND' as const
+  };
+}
+
+function addFilterCondition() {
+  form.conditions.push(createFilterCondition(metadata.value[0]?.fieldName || ''));
+}
+
+function removeFilterCondition(index: number) {
+  if (form.conditions.length <= 1) {
+    form.conditions.splice(0, 1, createFilterCondition(metadata.value[0]?.fieldName || ''));
+    return;
+  }
+  form.conditions.splice(index, 1);
+}
+
+function handleConditionOperatorChange(condition: FilterConditionModel) {
+  condition.value = '';
+  condition.valueTo = '';
+}
+
+async function runFilterQuery(pageNum = 1, refreshAnalysis = false) {
+  if (!form.datasetId) {
+    ElMessage.warning('请选择数据集');
+    return;
+  }
+  const conditions = buildFilterConditions();
+  if (!conditions.length) {
+    ElMessage.warning('请至少填写一条有效筛选条件');
     return;
   }
   try {
     const result = await filterQuery({
       datasetId: form.datasetId,
-      field: form.field,
-      operator: form.operator,
-      value: form.value,
-      pageNum: 1,
-      pageSize: 20
+      conditions,
+      logic: form.logic,
+      sortField: form.sortField || undefined,
+      sortOrder: form.sortOrder,
+      pageNum,
+      pageSize: resultPage.pageSize
     });
     lastQueryMode.value = 'FILTER';
     tableData.value = result.records;
-    await loadDatasetAnalysis();
+    resultPage.pageNum = result.pageNum;
+    resultPage.pageSize = result.pageSize;
+    resultPage.total = result.total;
+    sqlResultColumns.value = [];
+    if (pageNum === 1 || refreshAnalysis) {
+      await refreshBaseChart(conditions);
+    }
+    if (refreshAnalysis) {
+      summary.value = await getAnalysisSummary(form.datasetId!);
+    }
   } catch (error) {
     ElMessage.error(`条件查询失败: ${(error as Error).message}`);
   }
 }
 
-async function runSqlQuery() {
+async function runSqlQuery(pageNum = 1) {
   if (!form.datasetId || !form.sql) {
     ElMessage.warning('请选择数据集并输入 SQL');
     return;
   }
   try {
     lastQueryMode.value = 'SQL';
-    tableData.value = await sqlQuery({
+    const result = await sqlQueryPage({
       datasetId: form.datasetId,
-      sql: form.sql
+      sql: form.sql,
+      sortField: form.sqlSortField || undefined,
+      sortOrder: form.sqlSortOrder,
+      pageNum,
+      pageSize: resultPage.pageSize
     });
+    tableData.value = result.records;
+    resultPage.pageNum = result.pageNum;
+    resultPage.pageSize = result.pageSize;
+    resultPage.total = result.total;
+    if (result.records.length) {
+      sqlResultColumns.value = Object.keys(result.records[0] || {});
+    }
   } catch (error) {
     ElMessage.error(`SQL 查询失败: ${(error as Error).message}`);
   }
+}
+
+function handleResultPageChange(pageNum: number) {
+  if (lastQueryMode.value === 'SQL') {
+    void runSqlQuery(pageNum);
+    return;
+  }
+  void runFilterQuery(pageNum, false);
+}
+
+function handleResultPageSizeChange(pageSize: number) {
+  resultPage.pageSize = pageSize;
+  resultPage.pageNum = 1;
+  if (lastQueryMode.value === 'SQL') {
+    void runSqlQuery(1);
+    return;
+  }
+  void runFilterQuery(1, false);
 }
 
 async function exportRows(format: 'csv' | 'json' | 'xlsx') {
@@ -233,11 +461,11 @@ async function exportRows(format: 'csv' | 'json' | 'xlsx') {
         : await exportFilterQuery(
             {
               datasetId: form.datasetId!,
-              field: form.field,
-              operator: form.operator,
-              value: form.value,
-              pageNum: 1,
-              pageSize: 20
+              conditions: buildFilterConditions(),
+              logic: form.logic,
+              sortField: form.sortField || undefined,
+              sortOrder: form.sortOrder,
+              exportScope: 'ALL'
             },
             format
           );
@@ -255,20 +483,19 @@ async function exportRows(format: 'csv' | 'json' | 'xlsx') {
 }
 
 async function runMetricQuery() {
-  if (!metricForm.datasetId) {
-    ElMessage.warning('请选择数据集');
-    return;
-  }
   try {
+    const context = await buildMetricQueryContext();
     const result = await queryEcommerceMetric({
-      datasetId: metricForm.datasetId,
+      datasetId: context.datasetId,
       metricType: metricForm.metricType,
       timeField: metricForm.timeField || undefined,
       valueField: metricForm.valueField || undefined,
       categoryField: metricForm.categoryField || undefined,
       productField: metricForm.productField || undefined,
       quantityField: metricForm.quantityField || undefined,
-      stockThreshold: metricForm.stockThreshold
+      stockThreshold: metricForm.stockThreshold,
+      conditions: context.conditions,
+      logic: context.logic
     });
     metricData.value = result.chart;
     metricTable.value = result.table;
@@ -365,6 +592,25 @@ function buildIntegrationOutputName() {
 watch(
   () => form.datasetId,
   () => {
+    resultPage.pageNum = 1;
+    resultPage.total = 0;
+    tableData.value = [];
+    form.sortField = '';
+    form.chartDimensionField = '';
+    form.sqlSortField = '';
+    sqlResultColumns.value = [];
+    baseChartHint.value = '基础分布图（全量）';
+    if (linkMetricWithQuery.value) {
+      metricForm.datasetId = form.datasetId;
+    }
+    if (!form.conditions.length) {
+      form.conditions.push(createFilterCondition());
+    }
+    for (const condition of form.conditions) {
+      condition.field = '';
+      condition.value = '';
+      condition.valueTo = '';
+    }
     void loadDatasetAnalysis();
   }
 );
@@ -377,6 +623,25 @@ watch(
       integrationForm.outputDatasetName = buildIntegrationOutputName();
     }
     void loadIntegrationMetadata();
+  }
+);
+
+watch(
+  () => linkMetricWithQuery.value,
+  (enabled) => {
+    if (enabled && form.datasetId) {
+      metricForm.datasetId = form.datasetId;
+    }
+  }
+);
+
+watch(
+  () => form.chartDimensionField,
+  () => {
+    if (!form.datasetId) {
+      return;
+    }
+    void refreshBaseChart();
   }
 );
 
@@ -431,8 +696,24 @@ onBeforeUnmount(() => {
                 />
               </el-select>
             </el-form-item>
-            <el-form-item label="字段">
-              <el-select v-model="form.field" placeholder="请选择字段">
+            <el-form-item label="条件逻辑">
+              <el-select v-model="form.logic">
+                <el-option label="AND（且）" value="AND" />
+                <el-option label="OR（或）" value="OR" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="图表维度字段">
+              <el-select v-model="form.chartDimensionField" clearable placeholder="默认首列字段">
+                <el-option
+                  v-for="column in metadata"
+                  :key="`chart-${column.fieldId}`"
+                  :label="column.fieldName"
+                  :value="column.fieldName"
+                />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="排序字段">
+              <el-select v-model="form.sortField" clearable placeholder="默认 row_id">
                 <el-option
                   v-for="column in metadata"
                   :key="column.fieldId"
@@ -441,21 +722,78 @@ onBeforeUnmount(() => {
                 />
               </el-select>
             </el-form-item>
-            <el-form-item label="操作符">
-              <el-select v-model="form.operator">
-                <el-option label="LIKE" value="LIKE" />
-                <el-option label="EQ" value="EQ" />
-                <el-option label="GT" value="GT" />
-                <el-option label="LT" value="LT" />
+            <el-form-item label="排序方向">
+              <el-select v-model="form.sortOrder">
+                <el-option label="ASC" value="ASC" />
+                <el-option label="DESC" value="DESC" />
               </el-select>
             </el-form-item>
-            <el-form-item label="条件值">
-              <el-input v-model="form.value" placeholder="例如 已支付" />
-            </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="runFilterQuery">执行条件查询</el-button>
+              <el-button type="primary" @click="runFilterQuery(1, true)">执行条件查询</el-button>
             </el-form-item>
           </el-form>
+          <div class="notice-box">
+            <el-button link type="primary" @click="addFilterCondition">新增条件</el-button>
+          </div>
+          <div
+            v-for="(condition, index) in form.conditions"
+            :key="`condition-${index}`"
+            class="action-row"
+          >
+            <el-form inline>
+              <el-form-item :label="`条件 ${index + 1} 字段`">
+                <el-select v-model="condition.field" placeholder="请选择字段">
+                  <el-option
+                    v-for="column in metadata"
+                    :key="column.fieldId"
+                    :label="column.fieldName"
+                    :value="column.fieldName"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="操作符">
+                <el-select v-model="condition.operator" @change="handleConditionOperatorChange(condition)">
+                  <el-option
+                    v-for="item in filterOperators"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item
+                v-if="condition.operator === 'BETWEEN' || condition.operator === 'TIME_RANGE'"
+                label="起止值"
+              >
+                <el-date-picker
+                  v-model="condition.value"
+                  type="datetime"
+                  value-format="YYYY-MM-DD HH:mm:ss"
+                  placeholder="开始时间"
+                />
+                <span style="margin: 0 8px;">到</span>
+                <el-date-picker
+                  v-model="condition.valueTo"
+                  type="datetime"
+                  value-format="YYYY-MM-DD HH:mm:ss"
+                  placeholder="结束时间"
+                />
+              </el-form-item>
+              <el-form-item v-else label="条件值">
+                <el-input v-model="condition.value" placeholder="请输入条件值" />
+              </el-form-item>
+              <el-form-item>
+                <el-button
+                  link
+                  type="danger"
+                  :disabled="form.conditions.length === 1"
+                  @click="removeFilterCondition(index)"
+                >
+                  删除
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </div>
           <el-input
             v-model="form.sql"
             type="textarea"
@@ -463,13 +801,34 @@ onBeforeUnmount(() => {
             placeholder="SELECT * FROM dataset LIMIT 20"
           />
           <div class="action-row">
-            <el-button type="primary" plain @click="runSqlQuery">执行 SQL 查询</el-button>
+            <el-input v-model="form.sqlSortField" placeholder="SQL 排序字段（可选）" style="width: 220px;" />
+            <el-select v-model="form.sqlSortOrder" style="width: 120px;">
+              <el-option label="ASC" value="ASC" />
+              <el-option label="DESC" value="DESC" />
+            </el-select>
+            <el-button type="primary" plain @click="runSqlQuery(1)">执行 SQL 查询</el-button>
+          </div>
+          <div v-if="sqlResultColumns.length" class="notice-box">
+            <el-tag
+              v-for="column in sqlResultColumns"
+              :key="`sql-column-${column}`"
+              style="margin-right: 8px; margin-bottom: 6px;"
+            >
+              {{ column }}
+            </el-tag>
           </div>
           <el-alert
             v-if="!canExportQuery"
             class="notice-box"
             title="当前角色只有查询查看权限，不能导出查询结果。"
             type="info"
+            :closable="false"
+          />
+          <el-alert
+            v-else
+            class="notice-box"
+            title="导出按当前筛选条件导出全量结果（最多 20000 条，建议先收敛筛选条件）。"
+            type="warning"
             :closable="false"
           />
 
@@ -508,11 +867,21 @@ onBeforeUnmount(() => {
                   :label="column"
                 />
               </el-table>
+              <el-pagination
+                class="notice-box"
+                layout="total, sizes, prev, pager, next"
+                :total="resultPage.total"
+                :current-page="resultPage.pageNum"
+                :page-size="resultPage.pageSize"
+                :page-sizes="[10, 20, 50, 100, 200]"
+                @current-change="handleResultPageChange"
+                @size-change="handleResultPageSizeChange"
+              />
             </el-card>
             <el-card shadow="never">
               <template #header>
                 <div class="card-header">
-                  <span>基础分布图</span>
+                  <span>{{ baseChartHint }}</span>
                   <el-tag>ECharts</el-tag>
                 </div>
               </template>
@@ -524,7 +893,7 @@ onBeforeUnmount(() => {
         <el-tab-pane label="电商指标" name="metric">
           <el-form inline>
             <el-form-item label="数据集">
-              <el-select v-model="metricForm.datasetId" placeholder="请选择数据集">
+              <el-select v-model="metricForm.datasetId" :disabled="linkMetricWithQuery" placeholder="请选择数据集">
                 <el-option
                   v-for="dataset in datasets"
                   :key="dataset.datasetId"
@@ -533,31 +902,44 @@ onBeforeUnmount(() => {
                 />
               </el-select>
             </el-form-item>
+            <el-form-item label="联动当前查询条件">
+              <el-switch v-model="linkMetricWithQuery" />
+            </el-form-item>
             <el-form-item label="指标类型">
               <el-select v-model="metricForm.metricType">
                 <el-option label="订单量趋势" value="ORDER_TREND" />
                 <el-option label="销售额趋势" value="SALES_TREND" />
                 <el-option label="热销商品排行" value="TOP_PRODUCTS" />
-                <el-option label="商品分类占比" value="CATEGORY_SHARE" />
                 <el-option label="库存预警视图" value="LOW_STOCK" />
+                <el-option label="商品分类占比" value="CATEGORY_SHARE" />
               </el-select>
             </el-form-item>
-            <el-form-item label="时间字段">
+            <el-form-item v-if="metricForm.metricType === 'ORDER_TREND' || metricForm.metricType === 'SALES_TREND'" label="时间字段">
               <el-input v-model="metricForm.timeField" placeholder="可留空自动识别" />
             </el-form-item>
-            <el-form-item label="数值字段">
+            <el-form-item label="图表时间范围">
+              <el-date-picker
+                v-model="metricTimeRange"
+                type="datetimerange"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                range-separator="至"
+                start-placeholder="开始时间"
+                end-placeholder="结束时间"
+              />
+            </el-form-item>
+            <el-form-item v-if="metricForm.metricType === 'SALES_TREND' || metricForm.metricType === 'LOW_STOCK'" label="数值字段">
               <el-input v-model="metricForm.valueField" placeholder="可留空自动识别" />
             </el-form-item>
-            <el-form-item label="分类字段">
+            <el-form-item v-if="metricForm.metricType === 'CATEGORY_SHARE'" label="分类字段">
               <el-input v-model="metricForm.categoryField" placeholder="可留空自动识别" />
             </el-form-item>
-            <el-form-item label="商品字段">
+            <el-form-item v-if="metricForm.metricType === 'TOP_PRODUCTS'" label="商品字段">
               <el-input v-model="metricForm.productField" placeholder="可留空自动识别" />
             </el-form-item>
-            <el-form-item label="销量字段">
+            <el-form-item v-if="metricForm.metricType === 'TOP_PRODUCTS'" label="销量字段">
               <el-input v-model="metricForm.quantityField" placeholder="可留空自动识别" />
             </el-form-item>
-            <el-form-item label="库存阈值">
+            <el-form-item v-if="metricForm.metricType === 'LOW_STOCK'" label="库存阈值">
               <el-input-number v-model="metricForm.stockThreshold" :min="0" :max="9999" />
             </el-form-item>
             <el-form-item>
@@ -567,7 +949,7 @@ onBeforeUnmount(() => {
 
           <el-alert
             class="notice-box"
-            :title="metricDescription || '支持订单量趋势、销售额趋势、热销商品、分类占比和库存预警查询。'"
+            :title="metricDescription || metricTemplateHint || '支持电商常用指标查询。'"
             type="success"
             :closable="false"
           />

@@ -43,6 +43,53 @@ export const overview: DashboardOverview = {
   recentFailedTasks: 2
 };
 
+// [已改造完成] 查询分析 Phase A：多条件/逻辑组合/排序分页口径（用于 mock 口径说明）
+export const queryFilterOperators = ['LIKE', 'EQ', 'GT', 'GTE', 'LT', 'LTE', 'BETWEEN', 'TIME_RANGE'] as const;
+
+export const queryPayloadExamples = {
+  filter: {
+    datasetId: 2001,
+    logic: 'AND',
+    conditions: [
+      { field: 'order_status', operator: 'EQ', value: 'PAID' },
+      { field: 'order_time', operator: 'TIME_RANGE', value: '2026-03-01 00:00:00', valueTo: '2026-03-31 23:59:59' }
+    ],
+    sortField: 'order_time',
+    sortOrder: 'DESC',
+    pageNum: 1,
+    pageSize: 20,
+    exportScope: 'ALL'
+  },
+  chartByFilter: {
+    datasetId: 2001,
+    dimensionField: 'order_status',
+    logic: 'AND',
+    conditions: [
+      { field: 'order_status', operator: 'EQ', value: 'PAID' },
+      { field: 'order_time', operator: 'TIME_RANGE', value: '2026-03-01 00:00:00', valueTo: '2026-03-31 23:59:59' }
+    ]
+  },
+  ecommerceMetric: {
+    datasetId: 2001,
+    metricType: 'SALES_TREND',
+    timeField: 'order_time',
+    valueField: 'amount',
+    logic: 'AND',
+    conditions: [
+      { field: 'order_status', operator: 'EQ', value: 'PAID' },
+      { field: 'order_time', operator: 'TIME_RANGE', value: '2026-03-01 00:00:00', valueTo: '2026-03-31 23:59:59' }
+    ]
+  },
+  sqlPage: {
+    datasetId: 2001,
+    sql: 'SELECT order_id, amount, order_time FROM dataset',
+    sortField: 'order_time',
+    sortOrder: 'DESC',
+    pageNum: 1,
+    pageSize: 20
+  }
+} as const;
+
 export const taskTrend = [
   { day: '03-21', total: 3 },
   { day: '03-22', total: 4 },

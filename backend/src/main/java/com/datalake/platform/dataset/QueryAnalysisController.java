@@ -8,6 +8,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -34,14 +36,37 @@ public class QueryAnalysisController {
             body.field(),
             body.operator(),
             body.value(),
+            body.valueTo(),
+            toServiceConditions(body.conditions()),
+            body.logic(),
+            body.sortField(),
+            body.sortOrder(),
             body.pageNum(),
-            body.pageSize()
+            body.pageSize(),
+            body.exportScope()
         )), requestId(request));
     }
 
     @PostMapping("/api/queries/sql")
     public ApiResponse<?> sql(@Valid @RequestBody SqlQueryRequest body, HttpServletRequest request) {
         return ApiResponse.success(queryAnalysisService.sql(new QueryAnalysisService.SqlQueryRequest(body.datasetId(), body.sql())), requestId(request));
+    }
+
+    @PostMapping("/api/queries/sql/page")
+    public ApiResponse<?> sqlPage(@Valid @RequestBody SqlPageQueryRequest body, HttpServletRequest request) {
+        return ApiResponse.success(
+            queryAnalysisService.sqlPage(
+                new QueryAnalysisService.SqlPageQueryRequest(
+                    body.datasetId(),
+                    body.sql(),
+                    body.sortField(),
+                    body.sortOrder(),
+                    body.pageNum(),
+                    body.pageSize()
+                )
+            ),
+            requestId(request)
+        );
     }
 
     @PostMapping("/api/queries/ecommerce-metric")
@@ -56,7 +81,9 @@ public class QueryAnalysisController {
                     body.categoryField(),
                     body.productField(),
                     body.quantityField(),
-                    body.stockThreshold()
+                    body.stockThreshold(),
+                    toServiceConditions(body.conditions()),
+                    body.logic()
                 )
             ),
             requestId(request)
@@ -107,7 +134,20 @@ public class QueryAnalysisController {
         @RequestParam(defaultValue = "csv") String format
     ) {
         TabularExportService.ExportedFile export = queryAnalysisService.exportFilter(
-            new QueryAnalysisService.FilterQueryRequest(body.datasetId(), body.field(), body.operator(), body.value(), body.pageNum(), body.pageSize()),
+            new QueryAnalysisService.FilterQueryRequest(
+                body.datasetId(),
+                body.field(),
+                body.operator(),
+                body.value(),
+                body.valueTo(),
+                toServiceConditions(body.conditions()),
+                body.logic(),
+                body.sortField(),
+                body.sortOrder(),
+                body.pageNum(),
+                body.pageSize(),
+                body.exportScope()
+            ),
             format
         );
         return ResponseEntity.ok()
@@ -139,23 +179,71 @@ public class QueryAnalysisController {
         return ApiResponse.success(queryAnalysisService.charts(datasetId), requestId(request));
     }
 
+    @PostMapping("/api/analysis/charts")
+    public ApiResponse<?> chartsByFilter(@Valid @RequestBody ChartQueryRequest body, HttpServletRequest request) {
+        return ApiResponse.success(
+            queryAnalysisService.charts(
+                new QueryAnalysisService.ChartQueryRequest(
+                    body.datasetId(),
+                    body.dimensionField(),
+                    toServiceConditions(body.conditions()),
+                    body.logic()
+                )
+            ),
+            requestId(request)
+        );
+    }
+
     private String requestId(HttpServletRequest request) {
         return request.getAttribute(RequestIdFilter.REQUEST_ID_ATTR).toString();
     }
 
+    private List<QueryAnalysisService.FilterCondition> toServiceConditions(List<QueryConditionRequest> conditions) {
+        if (conditions == null || conditions.isEmpty()) {
+            return List.of();
+        }
+        return conditions.stream()
+            .map(item -> new QueryAnalysisService.FilterCondition(item.field(), item.operator(), item.value(), item.valueTo()))
+            .collect(Collectors.toList());
+    }
+
     public record FilterQueryRequest(
         @NotNull(message = "datasetId 不能为空") Long datasetId,
-        @NotBlank(message = "field 不能为空") String field,
-        @NotBlank(message = "operator 不能为空") String operator,
-        @NotBlank(message = "value 不能为空") String value,
+        String field,
+        String operator,
+        String value,
+        String valueTo,
+        List<QueryConditionRequest> conditions,
+        String logic,
+        String sortField,
+        String sortOrder,
         Integer pageNum,
-        Integer pageSize
+        Integer pageSize,
+        String exportScope
+    ) {
+    }
+
+    public record QueryConditionRequest(
+        String field,
+        String operator,
+        String value,
+        String valueTo
     ) {
     }
 
     public record SqlQueryRequest(
         @NotNull(message = "datasetId 不能为空") Long datasetId,
         @NotBlank(message = "sql 不能为空") String sql
+    ) {
+    }
+
+    public record SqlPageQueryRequest(
+        @NotNull(message = "datasetId 不能为空") Long datasetId,
+        @NotBlank(message = "sql 不能为空") String sql,
+        String sortField,
+        String sortOrder,
+        Integer pageNum,
+        Integer pageSize
     ) {
     }
 
@@ -167,7 +255,17 @@ public class QueryAnalysisController {
         String categoryField,
         String productField,
         String quantityField,
-        Double stockThreshold
+        Double stockThreshold,
+        List<QueryConditionRequest> conditions,
+        String logic
+    ) {
+    }
+
+    public record ChartQueryRequest(
+        @NotNull(message = "datasetId 不能为空") Long datasetId,
+        String dimensionField,
+        List<QueryConditionRequest> conditions,
+        String logic
     ) {
     }
 

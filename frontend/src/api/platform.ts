@@ -121,6 +121,30 @@ export type PageResponse<T> = {
   records: T[];
 };
 
+export type QueryOperator = 'LIKE' | 'EQ' | 'GT' | 'GTE' | 'LT' | 'LTE' | 'BETWEEN' | 'TIME_RANGE';
+
+export type QueryCondition = {
+  field: string;
+  operator: QueryOperator | string;
+  value: string;
+  valueTo?: string;
+};
+
+export type FilterQueryPayload = {
+  datasetId: number;
+  field?: string;
+  operator?: string;
+  value?: string;
+  valueTo?: string;
+  conditions?: QueryCondition[];
+  logic?: 'AND' | 'OR';
+  sortField?: string;
+  sortOrder?: 'ASC' | 'DESC';
+  pageNum?: number;
+  pageSize?: number;
+  exportScope?: 'PAGE' | 'ALL';
+};
+
 export type MetricPoint = {
   name: string;
   value: number;
@@ -418,14 +442,7 @@ export function deleteDataset(datasetId: number) {
   return apiDelete<void>(`/datasets/${datasetId}`);
 }
 
-export function filterQuery(payload: {
-  datasetId: number;
-  field: string;
-  operator: string;
-  value: string;
-  pageNum?: number;
-  pageSize?: number;
-}) {
+export function filterQuery(payload: FilterQueryPayload) {
   return apiPost<PageResponse<Record<string, unknown>>>('/queries/filter', payload);
 }
 
@@ -433,15 +450,19 @@ export function sqlQuery(payload: { datasetId: number; sql: string }) {
   return apiPost<Record<string, unknown>[]>('/queries/sql', payload);
 }
 
+export function sqlQueryPage(payload: {
+  datasetId: number;
+  sql: string;
+  sortField?: string;
+  sortOrder?: 'ASC' | 'DESC';
+  pageNum?: number;
+  pageSize?: number;
+}) {
+  return apiPost<PageResponse<Record<string, unknown>>>('/queries/sql/page', payload);
+}
+
 export function exportFilterQuery(
-  payload: {
-    datasetId: number;
-    field: string;
-    operator: string;
-    value: string;
-    pageNum?: number;
-    pageSize?: number;
-  },
+  payload: FilterQueryPayload,
   format: 'csv' | 'json' | 'xlsx'
 ) {
   return apiDownloadPost('/queries/filter/export', payload, { format });
@@ -464,6 +485,15 @@ export function getAnalysisCharts(datasetId: number) {
   return apiGet<{ name: string; value: number }[]>(`/analysis/${datasetId}/charts`);
 }
 
+export function queryAnalysisCharts(payload: {
+  datasetId: number;
+  dimensionField?: string;
+  conditions?: QueryCondition[];
+  logic?: 'AND' | 'OR';
+}) {
+  return apiPost<{ name: string; value: number }[]>('/analysis/charts', payload);
+}
+
 export function queryEcommerceMetric(payload: {
   datasetId: number;
   metricType: 'ORDER_TREND' | 'SALES_TREND' | 'TOP_PRODUCTS' | 'CATEGORY_SHARE' | 'LOW_STOCK';
@@ -473,6 +503,8 @@ export function queryEcommerceMetric(payload: {
   productField?: string;
   quantityField?: string;
   stockThreshold?: number;
+  conditions?: QueryCondition[];
+  logic?: 'AND' | 'OR';
 }) {
   return apiPost<EcommerceMetricResponse>('/queries/ecommerce-metric', payload);
 }
