@@ -45,13 +45,24 @@ public class GovernanceService {
     }
 
     public List<OperatorSummary> operators() {
-        return jdbcTemplate.query(
+        return operators(false);
+    }
+
+    public List<OperatorSummary> operators(boolean includeDisabled) {
+        String sql = includeDisabled
+            ? """
+                select operator_id,operator_name,operator_key,operator_type,description,status
+                from operator_def
+                order by operator_id asc
             """
+            : """
                 select operator_id,operator_name,operator_key,operator_type,description,status
                 from operator_def
                 where status = 'ENABLED'
                 order by operator_id asc
-            """,
+            """;
+        return jdbcTemplate.query(
+            sql,
             (rs, rowNum) -> new OperatorSummary(
                 rs.getLong("operator_id"),
                 rs.getString("operator_name"),
@@ -61,6 +72,20 @@ public class GovernanceService {
                 rs.getString("status")
             )
         );
+    }
+
+    public OperatorSummary updateOperatorStatus(String operatorKey, String status) {
+        String normalizedOperatorKey = normalizeOperatorKey(operatorKey);
+        String normalizedStatus = normalizeOperatorStatus(status);
+        int updated = jdbcTemplate.update(
+            "update operator_def set status = ? where operator_key = ?",
+            normalizedStatus,
+            normalizedOperatorKey
+        );
+        if (updated <= 0) {
+            throw new IllegalArgumentException("治理算子不存在: " + operatorKey);
+        }
+        return findOperator(normalizedOperatorKey);
     }
 
     public List<GovernanceFlowSummary> flows() {
@@ -193,12 +218,70 @@ public class GovernanceService {
         if (operatorChain == null || operatorChain.isEmpty()) {
             throw new IllegalArgumentException("治理算子链不能为空");
         }
-        List<String> supported = operators().stream().map(OperatorSummary::operatorKey).toList();
+        Map<String, String> statusMap = jdbcTemplate.query(
+            "select operator_key,status from operator_def",
+            rs -> {
+                LinkedHashMap<String, String> map = new LinkedHashMap<>();
+                while (rs.next()) {
+                    String key = normalizeOperatorKey(rs.getString("operator_key"));
+                    String status = rs.getString("status");
+                    map.put(key, status == null ? "ENABLED" : status.trim().toUpperCase(Locale.ROOT));
+                }
+                return map;
+            }
+        );
         for (OperatorStep step : operatorChain) {
-            if (!supported.contains(step.operatorKey())) {
+            String key = normalizeOperatorKey(step.operatorKey());
+            String status = statusMap.get(key);
+            if (status == null) {
                 throw new IllegalArgumentException("不支持的治理算子: " + step.operatorKey());
             }
+            if (!"ENABLED".equals(status)) {
+                throw new IllegalArgumentException("治理算子已停用: " + key);
+            }
         }
+    }
+
+    private String normalizeOperatorKey(String operatorKey) {
+        if (operatorKey == null || operatorKey.isBlank()) {
+            throw new IllegalArgumentException("operatorKey 不能为空");
+        }
+        return operatorKey.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeOperatorStatus(String status) {
+        if ("ENABLED".equalsIgnoreCase(status)) {
+            return "ENABLED";
+        }
+        if ("DISABLED".equalsIgnoreCase(status)) {
+            return "DISABLED";
+        }
+        throw new IllegalArgumentException("算子状态仅支持 ENABLED 或 DISABLED");
+    }
+
+    private OperatorSummary findOperator(String operatorKey) {
+        OperatorSummary operator = jdbcTemplate.query(
+            """
+                select operator_id,operator_name,operator_key,operator_type,description,status
+                from operator_def
+                where operator_key = ?
+            """,
+            rs -> rs.next()
+                ? new OperatorSummary(
+                    rs.getLong("operator_id"),
+                    rs.getString("operator_name"),
+                    rs.getString("operator_key"),
+                    rs.getString("operator_type"),
+                    rs.getString("description"),
+                    rs.getString("status")
+                )
+                : null,
+            operatorKey
+        );
+        if (operator == null) {
+            throw new IllegalArgumentException("治理算子不存在: " + operatorKey);
+        }
+        return operator;
     }
 
     private String writeOperatorChain(List<OperatorStep> operatorChain) {

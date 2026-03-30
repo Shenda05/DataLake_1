@@ -176,12 +176,11 @@ public class DataBootstrapRunner implements ApplicationRunner {
         Integer count = jdbcTemplate.queryForObject("select count(*) from operator_def where operator_key = ?", Integer.class, operatorKey);
         if (count != null && count > 0) {
             jdbcTemplate.update(
-                "update operator_def set operator_name = ?, operator_type = ?, config_schema = ?, description = ?, status = ? where operator_key = ?",
+                "update operator_def set operator_name = ?, operator_type = ?, config_schema = ?, description = ? where operator_key = ?",
                 operatorName,
                 operatorType,
                 configSchema,
                 description,
-                "ENABLED",
                 operatorKey
             );
             return;

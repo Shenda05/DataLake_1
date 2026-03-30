@@ -7,6 +7,10 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,14 +30,63 @@ public class TaskLogService {
     }
 
     public List<TaskLogSummary> list() {
-        return jdbcTemplate.query(
+        return list(null, null, null, null, null, null);
+    }
+
+    public List<TaskLogSummary> list(
+        String taskType,
+        String status,
+        Long operatorUser,
+        String startTime,
+        String endTime,
+        String keyword
+    ) {
+        StringBuilder sql = new StringBuilder(
             """
                 select l.log_id,l.task_id,l.task_type,l.target_id,l.start_time,l.end_time,l.status,l.execution_summary,l.error_message,l.duration,
+                       l.operator_user,operator_user.username as operator_name,
                        coalesce(t.task_name, case when l.task_type = 'GOVERNANCE' then '手动治理执行' else '手动任务执行' end) as task_name
                 from task_log l
                 left join task_def t on t.task_id = l.task_id
-                order by l.log_id desc
-            """,
+                left join sys_user operator_user on operator_user.user_id = l.operator_user
+                where 1 = 1
+            """
+        );
+        List<Object> args = new ArrayList<>();
+
+        if (taskType != null && !taskType.isBlank()) {
+            sql.append(" and l.task_type = ?");
+            args.add(taskType.trim().toUpperCase());
+        }
+        if (status != null && !status.isBlank()) {
+            sql.append(" and l.status = ?");
+            args.add(status.trim().toUpperCase());
+        }
+        if (operatorUser != null) {
+            sql.append(" and l.operator_user = ?");
+            args.add(operatorUser);
+        }
+        LocalDateTime start = parseLogTime(startTime, false);
+        LocalDateTime end = parseLogTime(endTime, true);
+        if (start != null) {
+            sql.append(" and l.start_time >= ?");
+            args.add(Timestamp.valueOf(start));
+        }
+        if (end != null) {
+            sql.append(" and l.start_time <= ?");
+            args.add(Timestamp.valueOf(end));
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            String pattern = "%" + keyword.trim().toLowerCase() + "%";
+            sql.append(" and (lower(coalesce(t.task_name, '')) like ? or lower(coalesce(l.execution_summary, '')) like ? or lower(coalesce(l.error_message, '')) like ?)");
+            args.add(pattern);
+            args.add(pattern);
+            args.add(pattern);
+        }
+
+        sql.append(" order by l.log_id desc");
+        return jdbcTemplate.query(
+            sql.toString(),
             (rs, rowNum) -> new TaskLogSummary(
                 rs.getLong("log_id"),
                 (Long) rs.getObject("task_id"),
@@ -45,8 +98,11 @@ public class TaskLogService {
                 rs.getTimestamp("end_time") == null ? null : rs.getTimestamp("end_time").toLocalDateTime().toString(),
                 rs.getLong("duration"),
                 rs.getString("execution_summary"),
-                rs.getString("error_message")
-            )
+                rs.getString("error_message"),
+                (Long) rs.getObject("operator_user"),
+                rs.getString("operator_name")
+            ),
+            args.toArray()
         );
     }
 
@@ -55,9 +111,11 @@ public class TaskLogService {
             """
                 select l.log_id,l.task_id,l.task_type,l.target_id,l.start_time,l.end_time,l.status,l.execution_summary,l.error_message,l.duration,l.operator_user,l.create_time,
                        l.input_params,l.execution_steps,l.failure_reason,
+                       operator_user.username as operator_name,
                        coalesce(t.task_name, case when l.task_type = 'GOVERNANCE' then '手动治理执行' else '手动任务执行' end) as task_name
                 from task_log l
                 left join task_def t on t.task_id = l.task_id
+                left join sys_user operator_user on operator_user.user_id = l.operator_user
                 where l.log_id = ?
             """,
             rs -> rs.next()
@@ -77,6 +135,7 @@ public class TaskLogService {
                     parseExecutionSteps(rs.getString("execution_steps")),
                     parseFailureReason(rs.getString("failure_reason")),
                     (Long) rs.getObject("operator_user"),
+                    rs.getString("operator_name"),
                     rs.getTimestamp("create_time") == null ? null : rs.getTimestamp("create_time").toLocalDateTime().toString()
                 )
                 : null,
@@ -204,6 +263,22 @@ public class TaskLogService {
         return Math.max(0, java.time.Duration.between(startTime, endTime).getSeconds());
     }
 
+    private LocalDateTime parseLogTime(String raw, boolean endOfDay) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String normalized = raw.trim();
+        try {
+            if (normalized.length() <= 10) {
+                LocalDate date = LocalDate.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE);
+                return endOfDay ? date.atTime(23, 59, 59) : date.atStartOfDay();
+            }
+            return LocalDateTime.parse(normalized.replace(" ", "T"), DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("时间格式错误，应为 yyyy-MM-dd 或 yyyy-MM-dd HH:mm:ss");
+        }
+    }
+
     public record TaskLogSummary(
         Long logId,
         Long taskId,
@@ -215,7 +290,9 @@ public class TaskLogService {
         String endTime,
         Long duration,
         String executionSummary,
-        String errorMessage
+        String errorMessage,
+        Long operatorUser,
+        String operatorName
     ) {
     }
 
@@ -235,6 +312,7 @@ public class TaskLogService {
         List<ExecutionStep> executionSteps,
         FailureReason failureReason,
         Long operatorUser,
+        String operatorName,
         String createTime
     ) {
     }

@@ -17,9 +17,11 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -35,8 +37,21 @@ public class GovernanceController {
     }
 
     @GetMapping("/operators")
-    public ApiResponse<?> operators(HttpServletRequest request) {
-        return ApiResponse.success(governanceService.operators(), requestId(request));
+    public ApiResponse<?> operators(
+        @RequestParam(value = "includeDisabled", defaultValue = "false") boolean includeDisabled,
+        HttpServletRequest request
+    ) {
+        return ApiResponse.success(governanceService.operators(includeDisabled), requestId(request));
+    }
+
+    @PostMapping("/operators/{operatorKey}/status")
+    @PreAuthorize("hasAuthority('ACTION_governance.manage')")
+    public ApiResponse<?> updateOperatorStatus(
+        @PathVariable String operatorKey,
+        @Valid @RequestBody OperatorStatusRequest body,
+        HttpServletRequest request
+    ) {
+        return ApiResponse.success(governanceService.updateOperatorStatus(operatorKey, body.status()), requestId(request));
     }
 
     @GetMapping("/flows")
@@ -200,6 +215,11 @@ public class GovernanceController {
     public record OperatorStepRequest(
         @NotBlank(message = "operatorKey 不能为空") String operatorKey,
         Map<String, Object> params
+    ) {
+    }
+
+    public record OperatorStatusRequest(
+        @NotBlank(message = "status 不能为空") String status
     ) {
     }
 }

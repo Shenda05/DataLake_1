@@ -133,7 +133,9 @@ export const taskLogs = [
     endTime: '2026-03-27 02:03',
     duration: 180,
     executionSummary: '导入 1280 条，0 条失败',
-    errorMessage: ''
+    errorMessage: '',
+    operatorUser: 1,
+    operatorName: 'admin'
   },
   {
     logId: 4002,
@@ -147,6 +149,8 @@ export const taskLogs = [
     duration: 60,
     executionSummary: '治理执行失败',
     errorMessage: '字段 order_time 时间格式不符合要求',
+    operatorUser: 2,
+    operatorName: 'operator',
     failureReason: {
       code: 'GOVERNANCE_OPERATOR_FAILED',
       step: 'step-2:TIME_NORMALIZE',
@@ -157,15 +161,15 @@ export const taskLogs = [
 ];
 
 export const governanceOperators = [
-  { operatorKey: 'NULL_FILL', operatorType: 'CLEAN', operatorName: '空值填充' },
-  { operatorKey: 'DEDUPLICATE', operatorType: 'DEDUP', operatorName: '重复数据清理' },
-  { operatorKey: 'FIELD_CONVERT', operatorType: 'TRANSFORM', operatorName: '字段转换' },
-  { operatorKey: 'FILTER_KEEP', operatorType: 'FILTER', operatorName: '条件过滤' },
-  { operatorKey: 'ORDER_DEDUP', operatorType: 'DEDUP', operatorName: '订单去重' },
-  { operatorKey: 'AMOUNT_NORMALIZE', operatorType: 'TRANSFORM', operatorName: '金额标准化' },
-  { operatorKey: 'TIME_NORMALIZE', operatorType: 'TRANSFORM', operatorName: '时间标准化' },
-  { operatorKey: 'CATEGORY_NORMALIZE', operatorType: 'TRANSFORM', operatorName: '商品分类标准化' },
-  { operatorKey: 'STATUS_NORMALIZE', operatorType: 'TRANSFORM', operatorName: '状态标准化' }
+  { operatorId: 1, operatorKey: 'NULL_FILL', operatorType: 'CLEAN', operatorName: '空值填充', description: '将空值替换为指定内容', status: 'ENABLED' },
+  { operatorId: 2, operatorKey: 'DEDUPLICATE', operatorType: 'DEDUP', operatorName: '重复数据清理', description: '按指定字段去重', status: 'ENABLED' },
+  { operatorId: 3, operatorKey: 'FIELD_CONVERT', operatorType: 'TRANSFORM', operatorName: '字段转换', description: '执行字段清洗与格式转换', status: 'ENABLED' },
+  { operatorId: 4, operatorKey: 'FILTER_KEEP', operatorType: 'FILTER', operatorName: '条件过滤', description: '仅保留符合条件的记录', status: 'ENABLED' },
+  { operatorId: 5, operatorKey: 'ORDER_DEDUP', operatorType: 'DEDUP', operatorName: '订单去重', description: '按订单主键去重', status: 'ENABLED' },
+  { operatorId: 6, operatorKey: 'AMOUNT_NORMALIZE', operatorType: 'TRANSFORM', operatorName: '金额标准化', description: '统一金额格式为两位小数', status: 'ENABLED' },
+  { operatorId: 7, operatorKey: 'TIME_NORMALIZE', operatorType: 'TRANSFORM', operatorName: '时间标准化', description: '统一时间格式为 ISO 时间', status: 'ENABLED' },
+  { operatorId: 8, operatorKey: 'CATEGORY_NORMALIZE', operatorType: 'TRANSFORM', operatorName: '商品分类标准化', description: '规范商品分类值', status: 'ENABLED' },
+  { operatorId: 9, operatorKey: 'STATUS_NORMALIZE', operatorType: 'TRANSFORM', operatorName: '状态标准化', description: '规范订单或支付状态值', status: 'ENABLED' }
 ];
 
 export async function mockLogin(username: string, password: string): Promise<UserProfile> {

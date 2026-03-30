@@ -3,6 +3,8 @@ package com.datalake.platform.dataset;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -39,13 +41,13 @@ public class TabularExportService {
             }
             builder.append(String.join(",", values)).append('\n');
         }
-        return new ExportedFile(baseName + ".csv", "text/csv;charset=UTF-8", builder.toString().getBytes(StandardCharsets.UTF_8));
+        return new ExportedFile(buildFileName(baseName, "csv"), "text/csv;charset=UTF-8", builder.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     private ExportedFile exportJson(String baseName, List<Map<String, Object>> rows) {
         try {
             return new ExportedFile(
-                baseName + ".json",
+                buildFileName(baseName, "json"),
                 "application/json",
                 objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(rows)
             );
@@ -73,7 +75,7 @@ public class TabularExportService {
             }
             workbook.write(outputStream);
             return new ExportedFile(
-                baseName + ".xlsx",
+                buildFileName(baseName, "xlsx"),
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 outputStream.toByteArray()
             );
@@ -101,6 +103,24 @@ public class TabularExportService {
     private String csvEscape(String value) {
         String escaped = value.replace("\"", "\"\"");
         return escaped.contains(",") || escaped.contains("\"") || escaped.contains("\n") ? "\"" + escaped + "\"" : escaped;
+    }
+
+    private String buildFileName(String baseName, String extension) {
+        String safeBaseName = sanitizeBaseName(baseName);
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+        return safeBaseName + "_" + timestamp + "." + extension;
+    }
+
+    private String sanitizeBaseName(String baseName) {
+        String sanitized = baseName == null ? "" : baseName.trim();
+        sanitized = sanitized.replaceAll("[\\\\/:*?\"<>|]", "_");
+        sanitized = sanitized.replaceAll("\\s+", "_");
+        sanitized = sanitized.replaceAll("_+", "_");
+        sanitized = sanitized.replaceAll("^[._]+|[._]+$", "");
+        if (sanitized.isBlank()) {
+            return "export";
+        }
+        return sanitized;
     }
 
     public record ExportedFile(String fileName, String contentType, byte[] content) {

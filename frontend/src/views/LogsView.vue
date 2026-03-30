@@ -12,6 +12,7 @@ type LogFilterSnapshot = {
   keyword: string;
   status: string;
   taskType: string;
+  operatorUser: string;
   targetId: string;
   timeRange: string[];
   failedOnly: boolean;
@@ -30,10 +31,12 @@ const lastSyncedAt = ref('');
 const savedViewName = ref('');
 const selectedViewId = ref('');
 const savedViews = ref<SavedLogFilterView[]>([]);
+const loading = ref(false);
 const filters = reactive({
   keyword: '',
   status: '',
   taskType: '',
+  operatorUser: '',
   targetId: '',
   timeRange: [] as string[],
   failedOnly: false
@@ -56,19 +59,25 @@ const logTargetOptions = computed(() => {
   return Array.from(map.values());
 });
 
+const operatorOptions = computed(() => {
+  const map = new Map<string, string>();
+  for (const item of logs.value) {
+    if (item.operatorUser == null) {
+      continue;
+    }
+    const key = String(item.operatorUser);
+    if (!map.has(key)) {
+      map.set(key, item.operatorName || `用户 ${key}`);
+    }
+  }
+  return Array.from(map.entries()).map(([value, label]) => ({ value, label }));
+});
+
 const filteredLogs = computed(() =>
   logs.value.filter((log) => {
-    const matchesKeyword =
-      !filters.keyword ||
-      [log.taskName, log.executionSummary, log.errorMessage, log.taskType]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(filters.keyword.toLowerCase()));
-    const matchesStatus = !filters.status || log.status === filters.status;
-    const matchesTaskType = !filters.taskType || log.taskType === filters.taskType;
     const matchesTarget = !filters.targetId || String(log.targetId ?? '') === filters.targetId;
-    const matchesTimeRange = matchesDateRange(log.startTime || log.endTime, filters.timeRange);
     const matchesRecentFailed = !filters.failedOnly || isRecentFailed(log);
-    return matchesKeyword && matchesStatus && matchesTaskType && matchesTarget && matchesTimeRange && matchesRecentFailed;
+    return matchesTarget && matchesRecentFailed;
   })
 );
 
@@ -109,19 +118,39 @@ const selectedFailureReason = computed(() => selectedLog.value?.failureReason ||
 restoreFilters();
 loadSavedViews();
 
+function buildServerQueryParams() {
+  return {
+    keyword: filters.keyword || undefined,
+    status: filters.status || undefined,
+    taskType: filters.taskType || undefined,
+    operatorUser: filters.operatorUser ? Number(filters.operatorUser) : undefined,
+    startTime: filters.timeRange[0] || undefined,
+    endTime: filters.timeRange[1] || undefined
+  };
+}
+
 async function loadData() {
-  logs.value = await listTaskLogs();
-  lastSyncedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-  const queryLogId = Number(route.query.logId);
-  if (Number.isInteger(queryLogId) && queryLogId > 0 && logs.value.some((item) => item.logId === queryLogId)) {
-    await selectLog(queryLogId, false);
-  } else if (selectedLog.value && logs.value.some((item) => item.logId === selectedLog.value?.logId)) {
-    await selectLog(selectedLog.value.logId, false);
-  } else if (logs.value.length > 0) {
-    await selectLog(logs.value[0].logId, false);
-  } else {
-    selectedLog.value = null;
+  loading.value = true;
+  try {
+    logs.value = await listTaskLogs(buildServerQueryParams());
+    lastSyncedAt.value = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    const queryLogId = Number(route.query.logId);
+    if (Number.isInteger(queryLogId) && queryLogId > 0 && logs.value.some((item) => item.logId === queryLogId)) {
+      await selectLog(queryLogId, false);
+    } else if (selectedLog.value && logs.value.some((item) => item.logId === selectedLog.value?.logId)) {
+      await selectLog(selectedLog.value.logId, false);
+    } else if (logs.value.length > 0) {
+      await selectLog(logs.value[0].logId, false);
+    } else {
+      selectedLog.value = null;
+    }
+  } finally {
+    loading.value = false;
   }
+}
+
+async function queryLogs() {
+  await loadData();
 }
 
 async function selectLog(logId: number, syncRoute = true) {
@@ -183,13 +212,24 @@ function resetFilters() {
   filters.keyword = '';
   filters.status = '';
   filters.taskType = '';
+  filters.operatorUser = '';
   filters.targetId = '';
   filters.timeRange = [];
   filters.failedOnly = false;
 }
 
+async function resetAndQuery() {
+  resetFilters();
+  await queryLogs();
+}
+
 function formatTaskType(taskType: string) {
   return taskType === 'GOVERNANCE' ? '治理任务' : taskType === 'IMPORT' ? '导入任务' : taskType;
+}
+
+function applyTaskTypeQuickFilter(taskType: 'IMPORT' | 'GOVERNANCE') {
+  filters.taskType = taskType;
+  void queryLogs();
 }
 
 function goToDashboard() {
@@ -254,19 +294,6 @@ function toTimestamp(value?: string | null, endOfDay = false) {
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
-function matchesDateRange(value?: string | null, range: string[] = []) {
-  if (!range.length || (!range[0] && !range[1])) {
-    return true;
-  }
-  const valueTime = toTimestamp(value);
-  if (valueTime === null) {
-    return false;
-  }
-  const start = toTimestamp(range[0]);
-  const end = toTimestamp(range[1], true);
-  return (start === null || valueTime >= start) && (end === null || valueTime <= end);
-}
-
 function isRecentFailed(log?: TaskLogSummary | null) {
   if (!log || log.status !== 'FAILED') {
     return false;
@@ -280,6 +307,7 @@ function snapshotFilters(): LogFilterSnapshot {
     keyword: filters.keyword,
     status: filters.status,
     taskType: filters.taskType,
+    operatorUser: filters.operatorUser,
     targetId: filters.targetId,
     timeRange: [...filters.timeRange],
     failedOnly: filters.failedOnly
@@ -290,15 +318,16 @@ function restoreFilters() {
   const queryKeyword = getQueryValue('keyword');
   const queryStatus = getQueryValue('status');
   const queryTaskType = getQueryValue('taskType');
+  const queryOperatorUser = getQueryValue('operatorUser');
   const queryTargetId = getQueryValue('targetId');
   const queryStartDate = getQueryValue('startDate');
   const queryEndDate = getQueryValue('endDate');
   const queryFailedOnly = getQueryValue('failedOnly');
   const stored = localStorage.getItem(LOG_FILTERS_KEY);
-  let parsed: { keyword?: string; status?: string; taskType?: string; targetId?: string; timeRange?: string[]; failedOnly?: boolean } = {};
+  let parsed: { keyword?: string; status?: string; taskType?: string; operatorUser?: string; targetId?: string; timeRange?: string[]; failedOnly?: boolean } = {};
   if (stored) {
     try {
-      parsed = JSON.parse(stored) as { keyword?: string; status?: string; taskType?: string; targetId?: string; timeRange?: string[]; failedOnly?: boolean };
+      parsed = JSON.parse(stored) as { keyword?: string; status?: string; taskType?: string; operatorUser?: string; targetId?: string; timeRange?: string[]; failedOnly?: boolean };
     } catch {
       localStorage.removeItem(LOG_FILTERS_KEY);
     }
@@ -306,6 +335,7 @@ function restoreFilters() {
   filters.keyword = queryKeyword || parsed.keyword || '';
   filters.status = queryStatus || parsed.status || '';
   filters.taskType = queryTaskType || parsed.taskType || '';
+  filters.operatorUser = queryOperatorUser || parsed.operatorUser || '';
   filters.targetId = queryTargetId || parsed.targetId || '';
   filters.timeRange =
     queryStartDate || queryEndDate
@@ -346,6 +376,7 @@ function applyFilterSnapshot(snapshot: LogFilterSnapshot) {
   filters.keyword = snapshot.keyword || '';
   filters.status = snapshot.status || '';
   filters.taskType = snapshot.taskType || '';
+  filters.operatorUser = snapshot.operatorUser || '';
   filters.targetId = snapshot.targetId || '';
   filters.timeRange = Array.isArray(snapshot.timeRange) ? snapshot.timeRange : [];
   filters.failedOnly = Boolean(snapshot.failedOnly);
@@ -419,7 +450,7 @@ function syncRouteState(patch: Record<string, string>) {
 }
 
 function buildCsv(rows: TaskLogSummary[]) {
-  const headers = ['logId', 'taskId', 'taskName', 'taskType', 'targetId', 'status', 'startTime', 'endTime', 'duration', 'executionSummary', 'errorMessage'];
+  const headers = ['logId', 'taskId', 'taskName', 'taskType', 'targetId', 'status', 'operatorUser', 'operatorName', 'startTime', 'endTime', 'duration', 'executionSummary', 'errorMessage'];
   return [headers.join(','), ...rows.map((row) =>
     headers
       .map((header) => {
@@ -431,6 +462,34 @@ function buildCsv(rows: TaskLogSummary[]) {
   )].join('\n');
 }
 
+function sanitizeFileNameBase(raw: string) {
+  const normalized = raw
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[._]+|[._]+$/g, '');
+  return normalized || 'task_logs';
+}
+
+function buildExportTimestamp() {
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+}
+
+function buildLogExportFileName(format: 'csv' | 'json') {
+  const uniqueTaskNames = Array.from(
+    new Set(
+      filteredLogs.value
+        .map((item) => item.taskName)
+        .filter((item): item is string => Boolean(item && item.trim()))
+    )
+  );
+  const base = uniqueTaskNames.length === 1 ? sanitizeFileNameBase(uniqueTaskNames[0]) : 'task_logs';
+  return `${base}_${buildExportTimestamp()}.${format}`;
+}
+
 function exportLogs(format: 'csv' | 'json') {
   if (!canExportLogs.value) {
     ElMessage.warning('当前角色没有日志导出权限');
@@ -440,7 +499,7 @@ function exportLogs(format: 'csv' | 'json') {
     ElMessage.warning('当前筛选结果为空，暂无可导出的日志');
     return;
   }
-  const filename = `task-logs-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.${format}`;
+  const filename = buildLogExportFileName(format);
   const blob =
     format === 'json'
       ? new Blob([JSON.stringify(filteredLogs.value, null, 2)], { type: 'application/json' })
@@ -457,13 +516,14 @@ function exportLogs(format: 'csv' | 'json') {
 }
 
 watch(
-  () => [filters.keyword, filters.status, filters.taskType, filters.targetId, filters.timeRange[0], filters.timeRange[1], String(filters.failedOnly)],
+  () => [filters.keyword, filters.status, filters.taskType, filters.operatorUser, filters.targetId, filters.timeRange[0], filters.timeRange[1], String(filters.failedOnly)],
   () => {
     persistFilters();
     syncRouteState({
       keyword: filters.keyword,
       status: filters.status,
       taskType: filters.taskType,
+      operatorUser: filters.operatorUser,
       targetId: filters.targetId,
       startDate: filters.timeRange[0] || '',
       endDate: filters.timeRange[1] || '',
@@ -532,12 +592,12 @@ onMounted(async () => {
       <el-card shadow="hover">
         <p class="stat-label">导入任务日志</p>
         <p class="stat-value">{{ importLogCount }}</p>
-        <el-button link type="primary" @click="filters.taskType = 'IMPORT'">只看导入日志</el-button>
+        <el-button link type="primary" @click="applyTaskTypeQuickFilter('IMPORT')">只看导入日志</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">治理任务日志</p>
         <p class="stat-value">{{ governanceLogCount }}</p>
-        <el-button link type="primary" @click="filters.taskType = 'GOVERNANCE'">只看治理日志</el-button>
+        <el-button link type="primary" @click="applyTaskTypeQuickFilter('GOVERNANCE')">只看治理日志</el-button>
       </el-card>
       <el-card shadow="hover">
         <p class="stat-label">调度执行日志</p>
@@ -556,8 +616,9 @@ onMounted(async () => {
               <span class="inline-tip">已记忆筛选条件并同步到地址栏</span>
               <el-button link type="primary" :disabled="!canExportLogs" @click="exportLogs('csv')">导出 CSV</el-button>
               <el-button link type="primary" :disabled="!canExportLogs" @click="exportLogs('json')">导出 JSON</el-button>
-              <el-button link type="primary" @click="resetFilters">重置</el-button>
-              <el-button link type="primary" @click="loadData">刷新</el-button>
+              <el-button link type="primary" :loading="loading" @click="resetAndQuery">重置</el-button>
+              <el-button link type="primary" :loading="loading" @click="queryLogs">查询</el-button>
+              <el-button link type="primary" :loading="loading" @click="loadData">刷新</el-button>
               <el-button link type="primary" @click="goToDashboard">回首页</el-button>
             </div>
           </div>
@@ -593,6 +654,16 @@ onMounted(async () => {
               <el-option label="GOVERNANCE" value="GOVERNANCE" />
             </el-select>
           </el-form-item>
+          <el-form-item label="操作人">
+            <el-select v-model="filters.operatorUser" clearable placeholder="全部操作人">
+              <el-option
+                v-for="item in operatorOptions"
+                :key="item.value"
+                :label="`${item.label} (#${item.value})`"
+                :value="item.value"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="执行目标">
             <el-select v-model="filters.targetId" clearable placeholder="全部目标">
               <el-option
@@ -620,7 +691,7 @@ onMounted(async () => {
         </el-form>
         <el-alert
           class="notice-box"
-          :title="`当前显示 ${filteredLogs.length} / ${logs.length} 条日志，目标、时间范围和近 7 天失败筛选都会被记忆。`"
+          :title="`当前显示 ${filteredLogs.length} / ${logs.length} 条日志，核心条件（关键字/类型/状态/操作人/时间范围）使用服务端筛选，目标与近 7 天失败为本地快速筛选。`"
           type="info"
           :closable="false"
         />
@@ -670,11 +741,16 @@ onMounted(async () => {
           </div>
         </div>
       </template>
-      <el-table :data="filteredLogs" stripe @row-click="(row: TaskLogSummary) => selectLog(row.logId)">
+        <el-table :data="filteredLogs" stripe @row-click="(row: TaskLogSummary) => selectLog(row.logId)">
         <el-table-column prop="taskName" label="任务名称" />
         <el-table-column label="类型" width="120">
           <template #default="{ row }">
             {{ formatTaskType(row.taskType) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作人" width="140">
+          <template #default="{ row }">
+            {{ row.operatorName || (row.operatorUser != null ? `用户 ${row.operatorUser}` : '-') }}
           </template>
         </el-table-column>
         <el-table-column label="状态" width="120">
@@ -727,7 +803,9 @@ onMounted(async () => {
           <el-descriptions-item label="开始时间">{{ selectedLog.startTime || '-' }}</el-descriptions-item>
           <el-descriptions-item label="结束时间">{{ selectedLog.endTime || '-' }}</el-descriptions-item>
           <el-descriptions-item label="耗时">{{ selectedLog.duration }} 秒</el-descriptions-item>
-          <el-descriptions-item label="操作用户">{{ selectedLog.operatorUser ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="操作用户">
+            {{ selectedLog.operatorName || (selectedLog.operatorUser != null ? `用户 ${selectedLog.operatorUser}` : '-') }}
+          </el-descriptions-item>
           <el-descriptions-item label="执行摘要">{{ selectedLog.executionSummary || '-' }}</el-descriptions-item>
           <el-descriptions-item label="错误信息">{{ selectedLog.errorMessage || '-' }}</el-descriptions-item>
         </el-descriptions>

@@ -257,6 +257,8 @@ export type TaskLogSummary = {
   duration: number;
   executionSummary?: string | null;
   errorMessage?: string | null;
+  operatorUser?: number | null;
+  operatorName?: string | null;
 };
 
 export type TaskLogDetail = TaskLogSummary & {
@@ -264,6 +266,7 @@ export type TaskLogDetail = TaskLogSummary & {
   executionSteps?: TaskLogExecutionStep[];
   failureReason?: TaskLogFailureReason | null;
   operatorUser?: number | null;
+  operatorName?: string | null;
   createTime?: string | null;
 };
 
@@ -533,8 +536,12 @@ export function saveIntegrationResult(payload: {
   return apiPost<IntegrationSaveResponse>('/queries/integration/save', payload);
 }
 
-export function listGovernanceOperators() {
-  return apiGet<GovernanceOperator[]>('/governance/operators');
+export function listGovernanceOperators(params?: { includeDisabled?: boolean }) {
+  return apiGet<GovernanceOperator[]>('/governance/operators', params);
+}
+
+export function updateGovernanceOperatorStatus(operatorKey: string, status: 'ENABLED' | 'DISABLED') {
+  return apiPost<GovernanceOperator>(`/governance/operators/${encodeURIComponent(operatorKey)}/status`, { status });
 }
 
 export function listGovernanceFlows() {
@@ -604,8 +611,15 @@ export function resumeTask(taskId: number) {
   return apiPost<TaskActionResponse>(`/tasks/${taskId}/resume`);
 }
 
-export function listTaskLogs() {
-  return apiGet<TaskLogSummary[]>('/task-logs');
+export function listTaskLogs(params?: {
+  taskType?: string;
+  status?: string;
+  operatorUser?: number;
+  startTime?: string;
+  endTime?: string;
+  keyword?: string;
+}) {
+  return apiGet<TaskLogSummary[]>('/task-logs', params);
 }
 
 export function getTaskLogDetail(logId: number) {

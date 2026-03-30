@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { isAuthExpiredError } from '../api/client';
 import {
   createGovernanceFlow,
@@ -8,6 +8,7 @@ import {
   listDatasets,
   listGovernanceFlows,
   listGovernanceOperators,
+  updateGovernanceOperatorStatus,
   type DatasetSummary,
   type GovernanceExecutionResult,
   type GovernanceFlow,
@@ -27,6 +28,7 @@ const executionResult = ref<GovernanceExecutionResult | null>(null);
 const executionFailure = ref('');
 const loading = ref(false);
 const editingFlowId = ref<number | null>(null);
+const includeDisabledOperators = ref(true);
 const form = reactive({
   datasetId: undefined as number | undefined,
   flowName: '',
@@ -81,7 +83,7 @@ const selectedDatasetName = computed(() => datasets.value.find((item) => item.da
 
 async function loadData() {
   datasets.value = await listDatasets();
-  operators.value = await listGovernanceOperators();
+  operators.value = await listGovernanceOperators({ includeDisabled: includeDisabledOperators.value });
   flows.value = await listGovernanceFlows();
   if (!form.datasetId && datasets.value.length > 0) {
     form.datasetId = datasets.value[0].datasetId;
@@ -109,6 +111,24 @@ function removeStep(index: number) {
     return;
   }
   steps.value.splice(index, 1);
+}
+
+function moveStepUp(index: number) {
+  if (!canEditWorkflow.value || index <= 0) {
+    return;
+  }
+  const previous = steps.value[index - 1];
+  steps.value[index - 1] = steps.value[index];
+  steps.value[index] = previous;
+}
+
+function moveStepDown(index: number) {
+  if (!canEditWorkflow.value || index >= steps.value.length - 1) {
+    return;
+  }
+  const next = steps.value[index + 1];
+  steps.value[index + 1] = steps.value[index];
+  steps.value[index] = next;
 }
 
 function resetForm() {
@@ -142,6 +162,30 @@ function applyEcommerceTemplate(templateKey: string) {
   form.executionName = template.flowName;
   steps.value = template.steps.map((step) => ({ ...step }));
   ElMessage.success(`已套用模板：${template.label}`);
+}
+
+async function toggleOperatorStatus(operator: GovernanceOperator) {
+  if (!canManageGovernance.value) {
+    ElMessage.warning('当前角色没有治理流程保存权限');
+    return;
+  }
+  const nextStatus = operator.status === 'ENABLED' ? 'DISABLED' : 'ENABLED';
+  const actionText = nextStatus === 'ENABLED' ? '启用' : '停用';
+  try {
+    await ElMessageBox.confirm(`确认${actionText}算子 ${operator.operatorName}（${operator.operatorKey}）吗？`, `${actionText}治理算子`, {
+      type: 'warning',
+      confirmButtonText: '确认',
+      cancelButtonText: '取消'
+    });
+    await updateGovernanceOperatorStatus(operator.operatorKey, nextStatus);
+    await loadData();
+    ElMessage.success(`算子已${actionText}`);
+  } catch (error) {
+    if (error === 'cancel') {
+      return;
+    }
+    ElMessage.error(`更新算子状态失败: ${(error as Error).message}`);
+  }
 }
 
 function buildOperatorChain() {
@@ -231,14 +275,41 @@ onMounted(async () => {
         <template #header>
           <div class="card-header">
             <span>电商治理算子（兼容通用）</span>
-            <el-tag type="success">Real API</el-tag>
+            <div class="card-header-actions">
+              <el-switch
+                v-model="includeDisabledOperators"
+                inline-prompt
+                active-text="全部"
+                inactive-text="启用"
+                @change="loadData"
+              />
+              <el-tag type="success">Real API</el-tag>
+            </div>
           </div>
         </template>
         <el-table :data="operators" stripe>
           <el-table-column prop="operatorName" label="算子名称" />
           <el-table-column prop="operatorType" label="类型" width="120" />
           <el-table-column prop="operatorKey" label="标识" width="180" />
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'ENABLED' ? 'success' : 'info'">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="description" label="说明" />
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button
+                v-if="canManageGovernance"
+                link
+                :type="row.status === 'ENABLED' ? 'danger' : 'primary'"
+                @click="toggleOperatorStatus(row)"
+              >
+                {{ row.status === 'ENABLED' ? '停用' : '启用' }}
+              </el-button>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
         </el-table>
       </el-card>
 
@@ -300,7 +371,11 @@ onMounted(async () => {
             <template #header>
               <div class="card-header">
                 <span>步骤 {{ index + 1 }}</span>
-                <el-button link type="danger" :disabled="!canEditWorkflow" @click="removeStep(index)">删除</el-button>
+                <div class="card-header-actions">
+                  <el-button link :disabled="!canEditWorkflow || index === 0" @click="moveStepUp(index)">上移</el-button>
+                  <el-button link :disabled="!canEditWorkflow || index === steps.length - 1" @click="moveStepDown(index)">下移</el-button>
+                  <el-button link type="danger" :disabled="!canEditWorkflow" @click="removeStep(index)">删除</el-button>
+                </div>
               </div>
             </template>
             <el-form label-position="top">

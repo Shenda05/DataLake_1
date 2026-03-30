@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -24,8 +25,19 @@ public class TaskLogController {
     }
 
     @GetMapping
-    public ApiResponse<?> list(HttpServletRequest request) {
-        return ApiResponse.success(taskLogService.list(), requestId(request));
+    public ApiResponse<?> list(
+        @RequestParam(required = false) String taskType,
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) Long operatorUser,
+        @RequestParam(required = false) String startTime,
+        @RequestParam(required = false) String endTime,
+        @RequestParam(required = false) String keyword,
+        HttpServletRequest request
+    ) {
+        return ApiResponse.success(
+            taskLogService.list(taskType, status, operatorUser, startTime, endTime, keyword),
+            requestId(request)
+        );
     }
 
     @GetMapping("/{logId}")
