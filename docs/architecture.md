@@ -20,21 +20,22 @@
 
 ## 核心实体
 
-- `User`
-- `Role`
+- `User` / `Role`
 - `DataSource`
+- `ImportRecord`
 - `DataSet`
 - `MetaField`
-- `Operator`
+- `OperatorDef`
 - `GovernanceFlow`
-- `Task`
+- `TaskDef`
 - `TaskLog`
 
 ## 协作约束
 
 - 统一返回结构：`code`、`message`、`data`、`timestamp`、`requestId`
 - 统一分页结构：`pageNum`、`pageSize`、`total`、`records`
-- 统一任务类型：`IMPORT`、`GOVERNANCE`、`INTEGRATION`
+- 统一任务类型：`IMPORT`、`GOVERNANCE`
+- 数据集成通过查询分析页子标签能力实现，不扩展为独立任务类型
 - 治理输出必须保存为新数据集，禁止直接覆盖原始数据集
 - 前端 Week 1-2 默认使用 Mock 数据，Week 3 起替换为真实接口
 
@@ -46,4 +47,3 @@
 - Week 6：治理流程闭环
 - Week 7：任务调度与日志闭环
 - Week 8：联调、测试、答辩
-

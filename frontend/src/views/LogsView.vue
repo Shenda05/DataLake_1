@@ -227,6 +227,13 @@ function formatTaskType(taskType: string) {
   return taskType === 'GOVERNANCE' ? '治理任务' : taskType === 'IMPORT' ? '导入任务' : taskType;
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return '-';
+  }
+  return value.replace('T', ' ').replace('Z', '');
+}
+
 function applyTaskTypeQuickFilter(taskType: 'IMPORT' | 'GOVERNANCE') {
   filters.taskType = taskType;
   void queryLogs();
@@ -616,7 +623,7 @@ onMounted(async () => {
               <span class="inline-tip">已记忆筛选条件并同步到地址栏</span>
               <el-button link type="primary" :disabled="!canExportLogs" @click="exportLogs('csv')">导出 CSV</el-button>
               <el-button link type="primary" :disabled="!canExportLogs" @click="exportLogs('json')">导出 JSON</el-button>
-              <el-button link type="primary" :loading="loading" @click="resetAndQuery">重置</el-button>
+              <el-button link type="primary" :loading="loading" @click="resetAndQuery">重置筛选</el-button>
               <el-button link type="primary" :loading="loading" @click="queryLogs">查询</el-button>
               <el-button link type="primary" :loading="loading" @click="loadData">刷新</el-button>
               <el-button link type="primary" @click="goToDashboard">回首页</el-button>
@@ -758,8 +765,16 @@ onMounted(async () => {
             <el-tag :type="statusTagType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="startTime" label="开始时间" />
-        <el-table-column prop="endTime" label="结束时间" />
+        <el-table-column label="开始时间">
+          <template #default="{ row }">
+            {{ formatDateTime(row.startTime) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="结束时间">
+          <template #default="{ row }">
+            {{ formatDateTime(row.endTime) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="duration" label="耗时(秒)" width="100" />
         <el-table-column prop="executionSummary" label="执行摘要" />
         <el-table-column label="跳转" width="170">
@@ -800,8 +815,8 @@ onMounted(async () => {
           <el-descriptions-item label="任务名称">{{ selectedLog.taskName }}</el-descriptions-item>
           <el-descriptions-item label="任务类型">{{ formatTaskType(selectedLog.taskType) }}</el-descriptions-item>
           <el-descriptions-item label="目标 ID">{{ selectedLog.targetId ?? '-' }}</el-descriptions-item>
-          <el-descriptions-item label="开始时间">{{ selectedLog.startTime || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="结束时间">{{ selectedLog.endTime || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="开始时间">{{ formatDateTime(selectedLog.startTime) }}</el-descriptions-item>
+          <el-descriptions-item label="结束时间">{{ formatDateTime(selectedLog.endTime) }}</el-descriptions-item>
           <el-descriptions-item label="耗时">{{ selectedLog.duration }} 秒</el-descriptions-item>
           <el-descriptions-item label="操作用户">
             {{ selectedLog.operatorName || (selectedLog.operatorUser != null ? `用户 ${selectedLog.operatorUser}` : '-') }}

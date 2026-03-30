@@ -154,6 +154,40 @@ dataset_exists() {
   [[ "$code" == "0" ]]
 }
 
+dataset_matches_profile() {
+  local dataset_id="$1"
+  local expected_domain="$2"
+  local required_fields_csv="$3"
+  if ! dataset_exists "$dataset_id"; then
+    return 1
+  fi
+  local detail_response detail_code actual_domain metadata_response metadata_code
+  detail_response="$(api_request GET "/datasets/${dataset_id}")"
+  detail_code="$(json_get "$detail_response" "code" 2>/dev/null || true)"
+  if [[ "$detail_code" != "0" ]]; then
+    return 1
+  fi
+  actual_domain="$(json_get "$detail_response" "data.businessDomain" 2>/dev/null || true)"
+  if [[ -n "$expected_domain" && "$actual_domain" != "$expected_domain" ]]; then
+    return 1
+  fi
+  metadata_response="$(api_request GET "/metadata/${dataset_id}")"
+  metadata_code="$(json_get "$metadata_response" "code" 2>/dev/null || true)"
+  if [[ "$metadata_code" != "0" ]]; then
+    return 1
+  fi
+  node -e '
+    const payload = JSON.parse(process.argv[1] || "{}");
+    const required = (process.argv[2] || "")
+      .split(",")
+      .map(item => item.trim().toLowerCase())
+      .filter(Boolean);
+    const fields = new Set((payload.data || []).map(item => String(item.fieldName || "").toLowerCase()));
+    const ok = required.every(field => fields.has(field));
+    process.exit(ok ? 0 : 1);
+  ' "$metadata_response" "$required_fields_csv"
+}
+
 import_dataset_from_file() {
   local key="$1"
   local dataset_name="$2"
@@ -179,16 +213,11 @@ import_dataset_from_file() {
 }
 
 ensure_trade_dataset() {
-  local existing_id
-  existing_id="$(state_get tradeDatasetId)"
-  if dataset_exists "$existing_id"; then
-    echo "[OK] 复用 tradeDatasetId=${existing_id}"
-    return
-  fi
-  local day0 day1 day2 file_path
+  local day0 day1 day2 file_path suffix
   day0="$(node -e 'const d=new Date();process.stdout.write(d.toISOString().slice(0,10));')"
   day1="$(node -e 'const d=new Date();d.setDate(d.getDate()-1);process.stdout.write(d.toISOString().slice(0,10));')"
   day2="$(node -e 'const d=new Date();d.setDate(d.getDate()-2);process.stdout.write(d.toISOString().slice(0,10));')"
+  suffix="$(date +%H%M%S)_$RANDOM"
   file_path="${TMP_DIR}/trade.csv"
   cat > "$file_path" <<CSV
 order_id,product_id,product_name,category,quantity,amount,order_time,order_status
@@ -198,16 +227,17 @@ ORD-1003,SKU-2001,牛奶,食品生鲜,3,78.00,${day1} 09:00:00,PAID
 ORD-1004,SKU-3001,运动鞋,服饰鞋包,1,369.00,${day1} 18:22:00,PENDING
 ORD-1005,SKU-1002,无线鼠标,3C数码,4,516.00,${day2} 16:20:00,PAID
 CSV
-  import_dataset_from_file "tradeDatasetId" "demo_trade_${day0}_$(date +%H%M%S)" "TRADE" "$file_path"
+  import_dataset_from_file "tradeDatasetId" "demo_trade_${day0}_${suffix}" "TRADE" "$file_path"
 }
 
 ensure_product_dataset() {
-  local existing_id file_path
+  local existing_id file_path suffix
   existing_id="$(state_get productDatasetId)"
-  if dataset_exists "$existing_id"; then
+  if dataset_matches_profile "$existing_id" "PRODUCT" "product_id,product_name"; then
     echo "[OK] 复用 productDatasetId=${existing_id}"
     return
   fi
+  suffix="$(date +%H%M%S)_$RANDOM"
   file_path="${TMP_DIR}/product.csv"
   cat > "$file_path" <<CSV
 product_id,product_name,category,status
@@ -216,16 +246,17 @@ SKU-1002,无线鼠标,3C数码,ENABLED
 SKU-2001,牛奶,食品生鲜,ENABLED
 SKU-3001,运动鞋,服饰鞋包,ENABLED
 CSV
-  import_dataset_from_file "productDatasetId" "demo_product_$(date +%Y%m%d_%H%M%S)" "PRODUCT" "$file_path"
+  import_dataset_from_file "productDatasetId" "demo_product_$(date +%Y%m%d_%H%M%S)_${suffix}" "PRODUCT" "$file_path"
 }
 
 ensure_inventory_dataset() {
-  local existing_id file_path
+  local existing_id file_path suffix
   existing_id="$(state_get inventoryDatasetId)"
-  if dataset_exists "$existing_id"; then
+  if dataset_matches_profile "$existing_id" "INVENTORY" "product_id,stock"; then
     echo "[OK] 复用 inventoryDatasetId=${existing_id}"
     return
   fi
+  suffix="$(date +%H%M%S)_$RANDOM"
   file_path="${TMP_DIR}/inventory.csv"
   cat > "$file_path" <<CSV
 product_id,product_name,stock,warehouse
@@ -234,7 +265,7 @@ SKU-1002,无线鼠标,5,华北仓
 SKU-2001,牛奶,40,华南仓
 SKU-3001,运动鞋,9,华东仓
 CSV
-  import_dataset_from_file "inventoryDatasetId" "demo_inventory_$(date +%Y%m%d_%H%M%S)" "INVENTORY" "$file_path"
+  import_dataset_from_file "inventoryDatasetId" "demo_inventory_$(date +%Y%m%d_%H%M%S)_${suffix}" "INVENTORY" "$file_path"
 }
 
 prepare_demo_datasets() {

@@ -11,8 +11,8 @@
 - 任务页和日志页现在支持筛选条件记忆、URL 查询参数回填，并补齐了执行目标、时间范围、近 7 天失败记录等组合筛选；两页都支持保存常用筛选视图，日志页额外支持失败日志一键回放和按当前筛选结果导出。
 - `backend/`：Spring Boot 后端，已实现 JWT 登录鉴权、仪表盘聚合、数据源持久化、文件/数据库表导入、元数据生成、查询分析、治理执行、任务 CRUD、手动触发、任务日志和失败日志回放；并新增电商指标 API、基础 Join/Union 集成 API 与业务域字段贯穿。
 - `database/`：包含 `sys_user`、`sys_role`、`data_source`、`import_record`、`data_set`、`meta_field` 等表结构；`import_record` 与 `data_set` 已新增 `business_domain` 字段。
-- `docs/`：接口约定、架构说明、周计划、测试计划、测试报告、用户手册、演示脚本、浏览器回归检查单和 PPT 大纲。
-- `scripts/`：提供后端接口冒烟脚本，以及面向 MySQL 环境的回归辅助脚本。
+- `docs/`：接口约定、架构说明、测试计划/报告、用户手册、演示脚本、冻结审计、接口清单、表结构清单、模块清单和浏览器回归检查单。
+- `scripts/`：提供主链路冒烟、演示冒烟、MySQL 回归和统一回归入口脚本。
 - `storage/`：运行时自动生成，用于保存上传原文件。
 
 ## 当前主链路
@@ -54,11 +54,20 @@ VITE_API_BASE_URL=http://localhost:8081/api npm run dev
 
 ### 后端
 
-后端要求 `JDK 17+`。当前机器默认 `javac` 是 11，如需使用本机已安装的 JDK 18，可执行：
+后端要求 `JDK 17+`。建议先确认当前 Java 版本：
 
 ```bash
+java -version
+javac -version
+```
+
+如果默认版本不是 `17+`，请先切换到本机可用的 JDK 17（或更高）后再启动。示例：
+
+```bash
+export JAVA_HOME=/path/to/your/jdk17
+export PATH="$JAVA_HOME/bin:$PATH"
 cd backend
-env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home' PATH='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home/bin':$PATH mvn spring-boot:run
+mvn spring-boot:run
 ```
 
 后端默认使用 H2 内存库，启动时会自动初始化表结构和默认账号。
@@ -66,13 +75,13 @@ env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Conte
 如果本机 `8080` 已被占用，可临时改端口启动：
 
 ```bash
-env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home' PATH='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home/bin':$PATH mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
+mvn spring-boot:run -Dspring-boot.run.arguments=--server.port=8081
 ```
 
 如果需要切到 MySQL，可先创建数据库 `data_lake_platform`，再使用：
 
 ```bash
-env JAVA_HOME='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home' PATH='/Users/xyd/Library/Java/JavaVirtualMachines/corretto-18.0.2/Contents/Home/bin':$PATH mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+mvn spring-boot:run -Dspring-boot.run.profiles=mysql
 ```
 
 推荐先准备 MySQL 库和字符集：
@@ -119,6 +128,12 @@ bash scripts/api-smoke-test.sh
 BASE_URL=http://127.0.0.1:8086/api bash scripts/api-smoke-test.sh
 ```
 
+也可以运行统一回归入口（推荐冻结前执行）：
+
+```bash
+bash scripts/regression-suite.sh all
+```
+
 如果要补齐 MySQL 环境下的数据库表导入、`xlsx` 导出、日志回放和权限同步回归，可执行：
 
 ```bash
@@ -135,6 +150,16 @@ bash scripts/mysql-regression-check.sh
 - `logCountBeforeReplay=8`
 - `logCountAfterReplay=9`
 - `operatorActions` 已覆盖 `dataset.export / query.export / log.export / log.replay`
+
+冻结交付资料建议从以下文档查看：
+
+- [freeze-gap-review-round7.md](/Users/xyd/Desktop/DataLake/docs/freeze-gap-review-round7.md)
+- [api-inventory.md](/Users/xyd/Desktop/DataLake/docs/api-inventory.md)
+- [db-schema-catalog.md](/Users/xyd/Desktop/DataLake/docs/db-schema-catalog.md)
+- [module-map.md](/Users/xyd/Desktop/DataLake/docs/module-map.md)
+- [demo-runbook.md](/Users/xyd/Desktop/DataLake/docs/demo-runbook.md)
+- [regression-coverage-matrix.md](/Users/xyd/Desktop/DataLake/docs/regression-coverage-matrix.md)
+- [freeze-release-note.md](/Users/xyd/Desktop/DataLake/docs/freeze-release-note.md)
 
 ## 目录结构
 

@@ -53,3 +53,31 @@ bash scripts/ecommerce-demo-smoke.sh log-detail
 
 - `scripts/api-smoke-test.sh`：通用主链路冒烟脚本
 - `scripts/mysql-regression-check.sh`：MySQL 环境回归脚本
+- `scripts/regression-suite.sh`：统一回归入口（推荐冻结前执行）
+
+## 5. 统一回归入口
+
+```bash
+bash scripts/regression-suite.sh all
+```
+
+支持子命令：
+
+```bash
+bash scripts/regression-suite.sh smoke
+bash scripts/regression-suite.sh demo
+bash scripts/regression-suite.sh extended
+bash scripts/regression-suite.sh mysql
+bash scripts/regression-suite.sh gate
+```
+
+覆盖说明（`all`）：
+
+- 登录
+- 导入
+- 数据集管理（列表/详情/元数据/预览/导出）
+- 查询分析（含 SQL 分页）
+- 数据集成保存
+- 治理执行（成功/失败）
+- 任务触发
+- 日志详情与服务端筛选

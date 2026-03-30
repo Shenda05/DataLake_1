@@ -67,6 +67,13 @@ const previewColumns = computed(() => databasePreview.value?.columns ?? []);
 const canImportDatabase = computed(() => authStore.hasAction('import.database'));
 const selectedImportParamsText = computed(() => JSON.stringify(selectedImportDetail.value?.importParams || {}, null, 2));
 
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return '-';
+  }
+  return value.replace('T', ' ').replace('Z', '');
+}
+
 async function loadBaseData() {
   dataSources.value = await listDataSources();
   await loadHistory();
@@ -510,6 +517,11 @@ onMounted(async () => {
         <el-table-column prop="recordCount" label="记录数" width="100" />
         <el-table-column prop="status" label="状态" width="120" />
         <el-table-column prop="operatorName" label="操作人" width="120" />
+        <el-table-column label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.createTime) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="errorMessage" label="错误信息" />
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
@@ -533,7 +545,7 @@ onMounted(async () => {
           <el-descriptions-item label="状态">{{ selectedImportDetail.status }}</el-descriptions-item>
           <el-descriptions-item label="操作人">{{ selectedImportDetail.operatorName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="错误信息">{{ selectedImportDetail.errorMessage || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="创建时间">{{ selectedImportDetail.createTime }}</el-descriptions-item>
+          <el-descriptions-item label="创建时间">{{ formatDateTime(selectedImportDetail.createTime) }}</el-descriptions-item>
         </el-descriptions>
         <el-card v-if="Object.keys(selectedImportDetail?.importParams || {}).length" shadow="never">
           <template #header>

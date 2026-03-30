@@ -105,7 +105,7 @@ const targetOptions = computed(() => {
   if (form.taskType === 'IMPORT') {
     return importHistory.value.map((item) => ({
       value: item.importId,
-      label: `${item.datasetName} / ${item.formatType} / ${item.createTime}`
+      label: `${item.datasetName} / ${item.formatType} / ${formatDateTime(item.createTime)}`
     }));
   }
   return flows.value.map((item) => ({
@@ -360,6 +360,13 @@ function latestLog(taskId: number) {
 
 function formatTaskType(taskType: string) {
   return taskType === 'GOVERNANCE' ? '治理任务' : taskType === 'IMPORT' ? '导入任务' : taskType;
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return '-';
+  }
+  return value.replace('T', ' ').replace('Z', '');
 }
 
 function statusTagType(status: string) {
@@ -875,8 +882,16 @@ onBeforeUnmount(() => {
             {{ latestLog(row.taskId)?.executionSummary || latestLog(row.taskId)?.errorMessage || '等待首次执行' }}
           </template>
         </el-table-column>
-        <el-table-column prop="nextRunTime" label="下次执行时间" width="180" />
-        <el-table-column prop="lastRunTime" label="最近执行时间" width="180" />
+        <el-table-column label="下次执行时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.nextRunTime) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="最近执行时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.lastRunTime) }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <el-button v-if="canTriggerTasks" link type="primary" @click.stop="handleTrigger(row.taskId)">立即执行</el-button>

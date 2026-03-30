@@ -8,6 +8,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,7 +60,7 @@ public class DashboardService {
             String productColumn = resolveColumn(tradeFields, List.of("product_name", "sku_name", "product_id", "sku_id", "goods_name", "name"));
             String quantityColumn = resolveColumn(tradeFields, List.of("quantity", "qty", "buy_count", "count"));
             if (timeColumn != null) {
-                List<Map<String, Object>> rows = queryColumns(tradeDataset.tableName(), List.of(timeColumn, amountColumn, productColumn, quantityColumn));
+                List<Map<String, Object>> rows = queryColumns(tradeDataset.tableName(), Arrays.asList(timeColumn, amountColumn, productColumn, quantityColumn));
                 orderTrend = aggregateOrderTrend(rows, timeColumn);
                 salesTrend = aggregateSalesTrend(rows, timeColumn, amountColumn);
                 topProducts = aggregateTopProducts(rows, productColumn, quantityColumn);
@@ -169,8 +170,15 @@ public class DashboardService {
         }
         Map<String, String> normalized = new LinkedHashMap<>();
         for (Map.Entry<String, String> entry : fields.entrySet()) {
-            normalized.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
-            normalized.put(entry.getValue().toLowerCase(Locale.ROOT), entry.getValue());
+            String logicalName = entry.getKey();
+            String physicalName = entry.getValue();
+            if (physicalName == null || physicalName.isBlank()) {
+                continue;
+            }
+            if (logicalName != null && !logicalName.isBlank()) {
+                normalized.put(logicalName.toLowerCase(Locale.ROOT), physicalName);
+            }
+            normalized.put(physicalName.toLowerCase(Locale.ROOT), physicalName);
         }
         for (String candidate : candidates) {
             String matched = normalized.get(candidate.toLowerCase(Locale.ROOT));
