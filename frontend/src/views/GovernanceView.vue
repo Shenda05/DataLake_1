@@ -164,6 +164,10 @@ function applyEcommerceTemplate(templateKey: string) {
   ElMessage.success(`已套用模板：${template.label}`);
 }
 
+function flowRowClassName({ row }: { row: GovernanceFlow }) {
+  return row.flowId === editingFlowId.value ? 'current-row-highlight' : '';
+}
+
 async function toggleOperatorStatus(operator: GovernanceOperator) {
   if (!canManageGovernance.value) {
     ElMessage.warning('当前角色没有治理流程保存权限');
@@ -342,9 +346,9 @@ onMounted(async () => {
           type="warning"
           :closable="false"
         />
-        <el-form label-position="top">
-          <el-form-item label="输入数据集">
-            <el-select v-model="form.datasetId" placeholder="请选择数据集" :disabled="!canEditWorkflow">
+          <el-form label-position="top">
+            <el-form-item label="输入数据集">
+            <el-select v-model="form.datasetId" class="form-select-xl" placeholder="请选择数据集" :disabled="!canEditWorkflow">
               <el-option
                 v-for="dataset in datasets"
                 :key="dataset.datasetId"
@@ -379,8 +383,8 @@ onMounted(async () => {
               </div>
             </template>
             <el-form label-position="top">
-              <el-form-item label="算子">
-                <el-select v-model="step.operatorKey" :disabled="!canEditWorkflow">
+            <el-form-item label="算子">
+                <el-select v-model="step.operatorKey" class="form-select-wide" :disabled="!canEditWorkflow">
                   <el-option
                     v-for="operator in operators"
                     :key="operator.operatorKey"
@@ -415,7 +419,7 @@ onMounted(async () => {
         />
         <el-alert
           class="notice-box"
-          title="待增强：字段映射向导和算子参数可视化配置将在下一轮补齐。"
+          title="当前仍使用 JSON 编辑算子参数；字段映射向导和可视化参数配置尚未实现。"
           type="warning"
           :closable="false"
         />
@@ -445,7 +449,7 @@ onMounted(async () => {
           <el-button link type="primary" @click="loadData">刷新</el-button>
         </div>
       </template>
-      <el-table :data="flows" stripe @row-click="loadFlow">
+      <el-table :data="flows" stripe :row-class-name="flowRowClassName" @row-click="loadFlow">
         <el-table-column prop="flowName" label="流程名称" />
         <el-table-column prop="inputDatasetName" label="输入数据集" />
         <el-table-column prop="outputDatasetName" label="最近输出数据集" />

@@ -7,6 +7,7 @@ import {
   getImportDetail,
   importDatabase,
   importFile,
+  listDatabaseSchemas,
   listDataSources,
   listDatabaseTables,
   listImportHistory,
@@ -30,9 +31,11 @@ const loading = ref(false);
 const detailLoading = ref(false);
 const detailDrawerVisible = ref(false);
 const activeTab = ref<'file' | 'database'>('file');
+const databaseSchemas = ref<string[]>([]);
 const databaseTables = ref<DatabaseTableOption[]>([]);
 const databasePreview = ref<DatabasePreview | null>(null);
 const dbLoading = ref(false);
+const schemaLoading = ref(false);
 const BUSINESS_DOMAIN_OPTIONS: { label: string; value: BusinessDomain }[] = [
   { label: '用户域', value: 'USER' },
   { label: '商品域', value: 'PRODUCT' },
@@ -66,6 +69,8 @@ const fileSources = computed(() => dataSources.value.filter((item) => item.sourc
 const previewColumns = computed(() => databasePreview.value?.columns ?? []);
 const canImportDatabase = computed(() => authStore.hasAction('import.database'));
 const selectedImportParamsText = computed(() => JSON.stringify(selectedImportDetail.value?.importParams || {}, null, 2));
+const canSelectSchema = computed(() => Boolean(canImportDatabase.value && databaseForm.sourceId));
+const canSelectDatabaseTable = computed(() => Boolean(canImportDatabase.value && databaseForm.sourceId && databaseForm.schemaName));
 
 function formatDateTime(value?: string | null) {
   if (!value) {
@@ -75,6 +80,7 @@ function formatDateTime(value?: string | null) {
 }
 
 async function loadBaseData() {
+  const hadDatabaseSource = Boolean(databaseForm.sourceId);
   dataSources.value = await listDataSources();
   await loadHistory();
   const routeImportId = readRouteImportId();
@@ -86,11 +92,9 @@ async function loadBaseData() {
   }
   if (!databaseForm.sourceId && adminDatabaseSources.value.length > 0) {
     databaseForm.sourceId = adminDatabaseSources.value[0].sourceId;
-    const matched = adminDatabaseSources.value[0];
-    databaseForm.schemaName = matched.dbName || '';
   }
-  if (canImportDatabase.value && databaseForm.sourceId) {
-    await loadDatabaseTables();
+  if (canImportDatabase.value && databaseForm.sourceId && hadDatabaseSource) {
+    await loadDatabaseSchemasAndSelect();
   }
 }
 
@@ -200,20 +204,77 @@ async function loadDatabaseTables() {
   }
   if (!databaseForm.sourceId) {
     databaseTables.value = [];
+    databasePreview.value = null;
+    return;
+  }
+  if (!databaseForm.schemaName) {
+    databaseTables.value = [];
+    databasePreview.value = null;
+    databaseForm.tableName = '';
     return;
   }
   try {
     databaseTables.value = await listDatabaseTables(databaseForm.sourceId, databaseForm.schemaName || undefined);
+    if (!databaseTables.value.some((item) => item.tableName === databaseForm.tableName)) {
+      databaseForm.tableName = '';
+    }
     if (!databaseForm.tableName && databaseTables.value.length > 0) {
       databaseForm.tableName = databaseTables.value[0].tableName;
     }
-    if (databaseForm.tableName) {
-      await loadDatabasePreview();
+    if (!databaseTables.value.length) {
+      databasePreview.value = null;
     }
   } catch (error) {
     databaseTables.value = [];
     databasePreview.value = null;
     ElMessage.error(`数据库表加载失败: ${(error as Error).message}`);
+  }
+}
+
+function resetDatabaseSelection(options?: { clearSchema?: boolean }) {
+  if (options?.clearSchema) {
+    databaseForm.schemaName = '';
+    databaseSchemas.value = [];
+  }
+  databaseTables.value = [];
+  databaseForm.tableName = '';
+  databasePreview.value = null;
+}
+
+function resolvePreferredSchema() {
+  const selectedSource = adminDatabaseSources.value.find((item) => item.sourceId === databaseForm.sourceId);
+  const candidates = [databaseForm.schemaName, selectedSource?.dbName, databaseSchemas.value[0]]
+    .map((item) => (item || '').trim())
+    .filter(Boolean);
+  for (const candidate of candidates) {
+    if (databaseSchemas.value.includes(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0] || '';
+}
+
+async function loadDatabaseSchemasAndSelect() {
+  if (!canImportDatabase.value || !databaseForm.sourceId) {
+    databaseSchemas.value = [];
+    resetDatabaseSelection({ clearSchema: true });
+    return;
+  }
+  schemaLoading.value = true;
+  try {
+    databaseSchemas.value = await listDatabaseSchemas(databaseForm.sourceId);
+    const preferredSchema = resolvePreferredSchema();
+    const schemaChanged = databaseForm.schemaName !== preferredSchema;
+    databaseForm.schemaName = preferredSchema;
+    if (!schemaChanged && databaseForm.schemaName) {
+      await loadDatabaseTables();
+    }
+  } catch (error) {
+    databaseSchemas.value = [];
+    resetDatabaseSelection({ clearSchema: true });
+    ElMessage.error(`数据库列表加载失败: ${(error as Error).message}`);
+  } finally {
+    schemaLoading.value = false;
   }
 }
 
@@ -277,25 +338,46 @@ async function submitDatabaseImport() {
 
 watch(
   () => databaseForm.sourceId,
-  async (value) => {
+  async (value, oldValue) => {
     if (!value) {
+      resetDatabaseSelection({ clearSchema: true });
       return;
     }
-    const source = adminDatabaseSources.value.find((item) => item.sourceId === value);
-    if (source && !databaseForm.schemaName) {
-      databaseForm.schemaName = source.dbName || '';
+    if (value !== oldValue) {
+      resetDatabaseSelection({ clearSchema: true });
     }
-    await loadDatabaseTables();
+    await loadDatabaseSchemasAndSelect();
   }
 );
 
 watch(
-  () => [databaseForm.schemaName, databaseForm.tableName],
-  async ([, tableName], [, oldTableName]) => {
+  () => databaseForm.schemaName,
+  async (schemaName, oldSchemaName) => {
     if (!databaseForm.sourceId) {
       return;
     }
-    if (tableName && tableName !== oldTableName) {
+    if ((schemaName || '') === (oldSchemaName || '')) {
+      return;
+    }
+    resetDatabaseSelection();
+    if (schemaName) {
+      await loadDatabaseTables();
+    }
+  }
+);
+
+watch(
+  () => databaseForm.tableName,
+  async (tableName, oldTableName) => {
+    if (!databaseForm.sourceId || !databaseForm.schemaName) {
+      databasePreview.value = null;
+      return;
+    }
+    if (!tableName) {
+      databasePreview.value = null;
+      return;
+    }
+    if (tableName !== oldTableName) {
       await loadDatabasePreview();
     }
   }
@@ -349,7 +431,7 @@ onMounted(async () => {
             <div class="page-grid">
               <el-form label-position="top">
                 <el-form-item label="所属数据源">
-                  <el-select v-model="fileForm.sourceId" placeholder="请选择数据源">
+                  <el-select v-model="fileForm.sourceId" class="form-select-wide" placeholder="请选择数据源">
                     <el-option
                       v-for="source in fileSources"
                       :key="source.sourceId"
@@ -362,7 +444,7 @@ onMounted(async () => {
                   <el-input v-model="fileForm.datasetName" placeholder="请输入数据集名称" />
                 </el-form-item>
                 <el-form-item label="业务域">
-                  <el-select v-model="fileForm.businessDomain">
+                  <el-select v-model="fileForm.businessDomain" class="form-select-wide">
                     <el-option
                       v-for="domain in BUSINESS_DOMAIN_OPTIONS"
                       :key="domain.value"
@@ -390,7 +472,7 @@ onMounted(async () => {
           <div class="two-column-grid">
             <el-form label-position="top">
               <el-form-item label="数据库数据源">
-                <el-select v-model="databaseForm.sourceId" placeholder="请选择 MYSQL 数据源">
+                <el-select v-model="databaseForm.sourceId" class="form-select-wide" placeholder="请选择 MYSQL 数据源">
                   <el-option
                     v-for="source in adminDatabaseSources"
                     :key="source.sourceId"
@@ -400,10 +482,34 @@ onMounted(async () => {
                 </el-select>
               </el-form-item>
               <el-form-item label="Schema / Database">
-                <el-input v-model="databaseForm.schemaName" placeholder="默认使用数据源配置中的 dbName" />
+                <el-select
+                  v-model="databaseForm.schemaName"
+                  class="form-select-wide"
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  :loading="schemaLoading"
+                  :disabled="!canSelectSchema"
+                  placeholder="自动识别当前数据源可访问的数据库"
+                >
+                  <el-option
+                    v-for="schema in databaseSchemas"
+                    :key="schema"
+                    :label="schema"
+                    :value="schema"
+                  />
+                </el-select>
               </el-form-item>
               <el-form-item label="数据库表">
-                <el-select v-model="databaseForm.tableName" filterable placeholder="请选择数据表">
+                <el-select
+                  v-model="databaseForm.tableName"
+                  class="form-select-wide"
+                  filterable
+                  :loading="dbLoading"
+                  :disabled="!canSelectDatabaseTable"
+                  placeholder="请先选择 Schema / Database"
+                >
                   <el-option
                     v-for="table in databaseTables"
                     :key="table.displayName"
@@ -413,10 +519,10 @@ onMounted(async () => {
                 </el-select>
               </el-form-item>
               <el-form-item label="数据集名称">
-                <el-input v-model="databaseForm.datasetName" placeholder="导入后的数据集名称" />
+                <el-input v-model="databaseForm.datasetName" placeholder="选择数据库表后可自动带出默认名称" />
               </el-form-item>
               <el-form-item label="业务域">
-                <el-select v-model="databaseForm.businessDomain">
+                <el-select v-model="databaseForm.businessDomain" class="form-select-wide">
                   <el-option
                     v-for="domain in BUSINESS_DOMAIN_OPTIONS"
                     :key="domain.value"
@@ -429,9 +535,10 @@ onMounted(async () => {
                 <el-input v-model="databaseForm.description" type="textarea" :rows="3" placeholder="例如：外部业务库表快照导入" />
               </el-form-item>
               <div class="card-header-actions">
-                <el-button :loading="dbLoading" @click="loadDatabaseTables">刷新表列表</el-button>
-                <el-button :loading="dbLoading" @click="loadDatabasePreview">预览数据</el-button>
-                <el-button type="primary" :loading="loading" @click="submitDatabaseImport">导入为数据集</el-button>
+                <el-button :loading="schemaLoading" :disabled="!databaseForm.sourceId" @click="loadDatabaseSchemasAndSelect">刷新库列表</el-button>
+                <el-button :loading="dbLoading" :disabled="!databaseForm.schemaName" @click="loadDatabaseTables">刷新表列表</el-button>
+                <el-button :loading="dbLoading" :disabled="!databaseForm.tableName" @click="loadDatabasePreview">预览数据</el-button>
+                <el-button type="primary" :loading="loading" :disabled="!databaseForm.tableName" @click="submitDatabaseImport">导入为数据集</el-button>
               </div>
             </el-form>
 
@@ -442,6 +549,11 @@ onMounted(async () => {
                   <el-tag>{{ databasePreview?.tableName || '未选择' }}</el-tag>
                 </div>
               </template>
+              <el-alert
+                title="请按“数据源 → Schema / Database → 数据库表”的顺序选择；切换数据库后会自动刷新表列表。"
+                type="info"
+                :closable="false"
+              />
               <el-table :data="previewColumns" stripe>
                 <el-table-column prop="fieldName" label="字段名" />
                 <el-table-column prop="fieldType" label="字段类型" width="140" />
@@ -480,7 +592,7 @@ onMounted(async () => {
       </template>
       <el-form inline class="notice-box">
         <el-form-item label="业务域">
-          <el-select v-model="historyFilters.businessDomain" clearable placeholder="全部业务域">
+          <el-select v-model="historyFilters.businessDomain" class="form-select-wide" clearable placeholder="全部业务域">
             <el-option
               v-for="domain in BUSINESS_DOMAIN_OPTIONS"
               :key="domain.value"
@@ -490,7 +602,7 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="historyFilters.status" clearable placeholder="全部状态">
+          <el-select v-model="historyFilters.status" class="form-select-medium" clearable placeholder="全部状态">
             <el-option label="SUCCESS" value="SUCCESS" />
             <el-option label="FAILED" value="FAILED" />
           </el-select>

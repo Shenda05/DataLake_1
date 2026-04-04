@@ -105,6 +105,10 @@ function handleRowClick(row: DatasetSummary) {
   void selectDataset(row.datasetId);
 }
 
+function datasetRowClassName({ row }: { row: DatasetSummary }) {
+  return row.datasetId === selectedDataset.value?.datasetId ? 'current-row-highlight' : '';
+}
+
 function readRouteDatasetId() {
   const raw = route.query.datasetId;
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -223,7 +227,7 @@ watch(
           <el-input v-model="datasetFilters.keyword" placeholder="按数据集名称搜索" />
         </el-form-item>
         <el-form-item label="来源数据源">
-          <el-select v-model="datasetFilters.sourceId" clearable placeholder="全部来源">
+          <el-select v-model="datasetFilters.sourceId" class="form-select-wide" clearable placeholder="全部来源">
             <el-option
               v-for="source in dataSources"
               :key="source.sourceId"
@@ -233,13 +237,13 @@ watch(
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="datasetFilters.status" clearable placeholder="全部状态">
+          <el-select v-model="datasetFilters.status" class="form-select-medium" clearable placeholder="全部状态">
             <el-option label="READY" value="READY" />
             <el-option label="DISABLED" value="DISABLED" />
           </el-select>
         </el-form-item>
         <el-form-item label="业务域">
-          <el-select v-model="datasetFilters.businessDomain" clearable placeholder="全部业务域">
+          <el-select v-model="datasetFilters.businessDomain" class="form-select-wide" clearable placeholder="全部业务域">
             <el-option label="用户域" value="USER" />
             <el-option label="商品域" value="PRODUCT" />
             <el-option label="交易域" value="TRADE" />
@@ -254,7 +258,7 @@ watch(
           <el-button @click="resetDatasetFilters">重置</el-button>
         </el-form-item>
       </el-form>
-      <el-table :data="datasets" stripe @row-click="handleRowClick">
+      <el-table :data="datasets" stripe :row-class-name="datasetRowClassName" @row-click="handleRowClick">
         <el-table-column prop="datasetName" label="数据集名称" />
         <el-table-column prop="businessDomain" label="业务域" width="130" />
         <el-table-column prop="formatType" label="格式" width="120" />
@@ -295,7 +299,7 @@ watch(
       </template>
       <el-form inline>
         <el-form-item label="字段">
-          <el-select v-model="previewFilters.field" clearable placeholder="全部字段">
+          <el-select v-model="previewFilters.field" class="form-select-wide" clearable placeholder="全部字段">
             <el-option
               v-for="column in metadata"
               :key="column.fieldId"

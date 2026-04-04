@@ -56,10 +56,19 @@
 - `POST /api/data-sources/{sourceId}/test`
 - `POST /api/data-sources/{sourceId}/status`
 
+`POST / PUT /api/data-sources` 可选字段：
+
+- `duplicateConnectionStrategy`：`ALLOW | WARN | REJECT`
+
+数据源保存响应可能补充：
+
+- `warningMessage`：当策略为 `WARN` 且检测到相同 MYSQL 连接配置时返回
+
 ### 导入
 
 - `POST /api/imports/file`
 - `POST /api/imports/database`
+- `GET /api/imports/database/schemas`
 - `GET /api/imports/database/tables`
 - `GET /api/imports/database/preview`
 - `GET /api/imports/history`  

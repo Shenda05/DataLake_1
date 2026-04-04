@@ -32,6 +32,8 @@ app:
     expire-seconds: 7200
   storage:
     root: ${APP_STORAGE_ROOT:../storage}
+  data-source:
+    duplicate-connection-strategy: ${APP_DATA_SOURCE_DUPLICATE_CONNECTION_STRATEGY:WARN}
   task:
     poll-delay-ms: ${APP_TASK_POLL_DELAY_MS:15000}
 

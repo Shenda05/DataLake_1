@@ -227,6 +227,10 @@ function formatTaskType(taskType: string) {
   return taskType === 'GOVERNANCE' ? '治理任务' : taskType === 'IMPORT' ? '导入任务' : taskType;
 }
 
+function logRowClassName({ row }: { row: TaskLogSummary }) {
+  return row.logId === selectedLog.value?.logId ? 'current-row-highlight' : '';
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) {
     return '-';
@@ -649,20 +653,20 @@ onMounted(async () => {
             <el-input v-model="filters.keyword" placeholder="任务名 / 摘要 / 错误信息" />
           </el-form-item>
           <el-form-item label="状态">
-            <el-select v-model="filters.status" clearable placeholder="全部状态">
+            <el-select v-model="filters.status" class="form-select-medium" clearable placeholder="全部状态">
               <el-option label="SUCCESS" value="SUCCESS" />
               <el-option label="FAILED" value="FAILED" />
               <el-option label="RUNNING" value="RUNNING" />
             </el-select>
           </el-form-item>
           <el-form-item label="类型">
-            <el-select v-model="filters.taskType" clearable placeholder="全部类型">
+            <el-select v-model="filters.taskType" class="form-select-medium" clearable placeholder="全部类型">
               <el-option label="IMPORT" value="IMPORT" />
               <el-option label="GOVERNANCE" value="GOVERNANCE" />
             </el-select>
           </el-form-item>
           <el-form-item label="操作人">
-            <el-select v-model="filters.operatorUser" clearable placeholder="全部操作人">
+            <el-select v-model="filters.operatorUser" class="form-select-wide" clearable placeholder="全部操作人">
               <el-option
                 v-for="item in operatorOptions"
                 :key="item.value"
@@ -672,7 +676,7 @@ onMounted(async () => {
             </el-select>
           </el-form-item>
           <el-form-item label="执行目标">
-            <el-select v-model="filters.targetId" clearable placeholder="全部目标">
+            <el-select v-model="filters.targetId" class="form-select-wide" clearable placeholder="全部目标">
               <el-option
                 v-for="item in logTargetOptions"
                 :key="item.value"
@@ -744,11 +748,19 @@ onMounted(async () => {
           <div class="card-header-actions">
             <el-tag type="success">实时列表</el-tag>
             <span class="inline-tip">当前筛选结果 {{ filteredLogs.length }} 条</span>
-            <el-button v-if="hasMenu('tasks')" link type="primary" @click="goToTasks(selectedLog)">查看对应任务</el-button>
+            <el-button
+              v-if="hasMenu('tasks')"
+              link
+              type="primary"
+              :disabled="!selectedLog?.taskId"
+              @click="goToTasks(selectedLog)"
+            >
+              查看当前选中任务
+            </el-button>
           </div>
         </div>
       </template>
-        <el-table :data="filteredLogs" stripe @row-click="(row: TaskLogSummary) => selectLog(row.logId)">
+        <el-table :data="filteredLogs" stripe :row-class-name="logRowClassName" @row-click="(row: TaskLogSummary) => selectLog(row.logId)">
         <el-table-column prop="taskName" label="任务名称" />
         <el-table-column label="类型" width="120">
           <template #default="{ row }">

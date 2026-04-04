@@ -15,7 +15,7 @@
 2. 使用 MySQL profile 启动后端
 3. 先执行 [mysql-regression-check.sh](/Users/xyd/Desktop/DataLake/scripts/mysql-regression-check.sh) 准备真实数据和基础校验
 
-最近一次脚本预检已在 `2026-03-27` 通过，样本结果为：
+最近一次脚本预检已通过，样本结果为：
 
 - `importedTable=operator_def`
 - `importedDatasetId=11`

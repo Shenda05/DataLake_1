@@ -255,9 +255,41 @@ body {
   width: 260px;
 }
 
+.form-select-narrow {
+  width: 140px;
+}
+
+.form-select-medium {
+  width: 220px;
+}
+
+.form-select-wide {
+  width: 300px;
+}
+
+.form-select-xl {
+  width: 380px;
+}
+
+.form-input-medium {
+  width: 220px;
+}
+
+.form-input-wide {
+  width: 320px;
+}
+
 .filter-summary {
   color: var(--ink-1);
   font-size: 14px;
+}
+
+.el-table .current-row-highlight > td.el-table__cell {
+  background: rgba(31, 143, 107, 0.12) !important;
+}
+
+.el-table .current-row-highlight:hover > td.el-table__cell {
+  background: rgba(31, 143, 107, 0.18) !important;
 }
 
 .tag-cluster {
@@ -388,6 +420,16 @@ body {
 
   .hero-panel {
     align-items: flex-start;
+  }
+
+  .form-select-narrow,
+  .form-select-medium,
+  .form-select-wide,
+  .form-select-xl,
+  .form-input-medium,
+  .form-input-wide,
+  .saved-view-select {
+    width: 100%;
   }
 
   .hero-side {

@@ -24,7 +24,8 @@ const form = reactive({
   dbName: '',
   username: '',
   password: '',
-  description: ''
+  description: '',
+  duplicateConnectionStrategy: 'WARN' as 'ALLOW' | 'WARN' | 'REJECT'
 });
 const canManageSources = computed(() => authStore.hasAction('source.manage'));
 
@@ -38,7 +39,8 @@ function resetForm() {
     dbName: '',
     username: '',
     password: '',
-    description: ''
+    description: '',
+    duplicateConnectionStrategy: 'WARN'
   });
 }
 
@@ -56,15 +58,20 @@ async function submit() {
     return;
   }
   try {
-    if (editingSourceId.value) {
-      await updateDataSource(editingSourceId.value, form);
-      ElMessage.success('数据源更新成功');
-    } else {
-      await createDataSource(form);
-      ElMessage.success('数据源创建成功');
-    }
+    const isEditing = Boolean(editingSourceId.value);
+    const result = editingSourceId.value
+      ? await updateDataSource(editingSourceId.value, form)
+      : await createDataSource(form);
+    const successMessage = isEditing ? '数据源更新成功' : '数据源创建成功';
     resetForm();
     await loadData();
+    ElMessage.success(successMessage);
+    if (result.warningMessage) {
+      ElMessageBox.alert(result.warningMessage, '重复连接提示', {
+        type: 'warning',
+        confirmButtonText: '知道了'
+      });
+    }
   } catch (error) {
     ElMessage.error(`保存失败: ${(error as Error).message}`);
   }
@@ -84,7 +91,8 @@ function handleEdit(source: DataSource) {
     dbName: source.dbName || '',
     username: source.username || '',
     password: '',
-    description: source.description || ''
+    description: source.description || '',
+    duplicateConnectionStrategy: 'WARN'
   });
 }
 
@@ -160,9 +168,16 @@ onMounted(async () => {
           <el-input v-model="form.sourceName" />
         </el-form-item>
         <el-form-item label="数据源类型">
-          <el-select v-model="form.sourceType">
+          <el-select v-model="form.sourceType" class="form-select-medium">
             <el-option label="FILE" value="FILE" />
             <el-option label="MYSQL" value="MYSQL" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="同连接处理策略">
+          <el-select v-model="form.duplicateConnectionStrategy" class="form-select-wide">
+            <el-option label="WARN（允许保存并提示，推荐）" value="WARN" />
+            <el-option label="REJECT（发现重复则拒绝）" value="REJECT" />
+            <el-option label="ALLOW（允许保存且不提示）" value="ALLOW" />
           </el-select>
         </el-form-item>
         <el-form-item label="主机地址">
@@ -183,6 +198,11 @@ onMounted(async () => {
         <el-form-item label="说明">
           <el-input v-model="form.description" type="textarea" :rows="3" />
         </el-form-item>
+        <el-alert
+          title="同名数据源始终禁止保存；若 MYSQL 连接配置与现有数据源重复，系统将按当前策略执行允许、提示或拒绝。"
+          type="info"
+          :closable="false"
+        />
         <div class="card-header-actions">
           <el-button type="primary" @click="submit">{{ editingSourceId ? '保存修改' : '创建数据源' }}</el-button>
           <el-button v-if="editingSourceId" @click="resetForm">取消编辑</el-button>

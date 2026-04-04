@@ -78,7 +78,8 @@ public class DataSourceController {
         String dbName,
         String username,
         String password,
-        String description
+        String description,
+        String duplicateConnectionStrategy
     ) {
     }
 

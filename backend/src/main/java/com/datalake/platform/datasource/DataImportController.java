@@ -78,6 +78,15 @@ public class DataImportController {
         return ApiResponse.success(dataImportService.listDatabaseTables(sourceId, schemaName), requestId(request));
     }
 
+    @GetMapping("/database/schemas")
+    @PreAuthorize("hasAuthority('ACTION_import.database')")
+    public ApiResponse<?> listDatabaseSchemas(
+        @RequestParam("sourceId") Long sourceId,
+        HttpServletRequest request
+    ) {
+        return ApiResponse.success(dataImportService.listDatabaseSchemas(sourceId), requestId(request));
+    }
+
     @GetMapping("/database/preview")
     @PreAuthorize("hasAuthority('ACTION_import.database')")
     public ApiResponse<?> previewDatabaseTable(

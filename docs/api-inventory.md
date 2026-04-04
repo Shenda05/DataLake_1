@@ -37,6 +37,7 @@
 
 - `POST /api/imports/file`
 - `POST /api/imports/database`
+- `GET /api/imports/database/schemas`
 - `GET /api/imports/database/tables`
 - `GET /api/imports/database/preview`
 - `GET /api/imports/history`  

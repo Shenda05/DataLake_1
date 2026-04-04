@@ -27,6 +27,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -256,6 +258,39 @@ public class DataImportService {
             return tables.stream().sorted((left, right) -> left.tableName().compareToIgnoreCase(right.tableName())).toList();
         } catch (Exception exception) {
             throw new IllegalArgumentException("读取数据库表列表失败: " + exception.getMessage(), exception);
+        }
+    }
+
+    public List<String> listDatabaseSchemas(Long sourceId) {
+        DataSourceService.DataSourceConnectionInfo profile = dataSourceService.connectionInfo(sourceId);
+        try (Connection connection = dataSourceService.openConnection(profile, null)) {
+            Set<String> schemas = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+            if (profile.dbName() != null && !profile.dbName().isBlank()) {
+                schemas.add(validateIdentifier(profile.dbName(), "schemaName"));
+            }
+            DatabaseMetaData metadata = connection.getMetaData();
+            try (ResultSet resultSet = metadata.getCatalogs()) {
+                while (resultSet.next()) {
+                    String catalog = resultSet.getString("TABLE_CAT");
+                    if (catalog != null && !catalog.isBlank() && IDENTIFIER_PATTERN.matcher(catalog).matches()) {
+                        schemas.add(catalog);
+                    }
+                }
+            }
+            try (ResultSet resultSet = metadata.getSchemas()) {
+                while (resultSet.next()) {
+                    String schema = resultSet.getString("TABLE_SCHEM");
+                    if (schema != null && !schema.isBlank() && IDENTIFIER_PATTERN.matcher(schema).matches()) {
+                        schemas.add(schema);
+                    }
+                }
+            }
+            if (schemas.isEmpty() && connection.getCatalog() != null && !connection.getCatalog().isBlank()) {
+                schemas.add(validateIdentifier(connection.getCatalog(), "schemaName"));
+            }
+            return schemas.stream().toList();
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("读取 Schema / Database 列表失败: " + exception.getMessage(), exception);
         }
     }
 

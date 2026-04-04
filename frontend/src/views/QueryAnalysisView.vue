@@ -50,6 +50,8 @@ const integrationSaving = ref(false);
 const resultColumns = computed(() => Object.keys(tableData.value[0] || {}));
 const metricColumns = computed(() => Object.keys(metricTable.value[0] || {}));
 const integrationColumns = computed(() => integrationResult.value?.columns || []);
+const currentQueryMatchCount = computed(() => resultPage.total);
+const currentQueryPageCount = computed(() => tableData.value.length);
 const canExportQuery = computed(() => authStore.hasAction('query.export'));
 const linkMetricWithQuery = ref(true);
 const metricTimeRange = ref<[string, string] | []>([]);
@@ -687,7 +689,7 @@ onBeforeUnmount(() => {
         <el-tab-pane label="条件/SQL 查询" name="base">
           <el-form inline>
             <el-form-item label="数据集">
-              <el-select v-model="form.datasetId" placeholder="请选择数据集">
+              <el-select v-model="form.datasetId" class="form-select-xl" placeholder="请选择数据集">
                 <el-option
                   v-for="dataset in datasets"
                   :key="dataset.datasetId"
@@ -697,13 +699,13 @@ onBeforeUnmount(() => {
               </el-select>
             </el-form-item>
             <el-form-item label="条件逻辑">
-              <el-select v-model="form.logic">
+              <el-select v-model="form.logic" class="form-select-narrow">
                 <el-option label="AND（且）" value="AND" />
                 <el-option label="OR（或）" value="OR" />
               </el-select>
             </el-form-item>
             <el-form-item label="图表维度字段">
-              <el-select v-model="form.chartDimensionField" clearable placeholder="默认首列字段">
+              <el-select v-model="form.chartDimensionField" class="form-select-wide" clearable placeholder="默认首列字段">
                 <el-option
                   v-for="column in metadata"
                   :key="`chart-${column.fieldId}`"
@@ -713,7 +715,7 @@ onBeforeUnmount(() => {
               </el-select>
             </el-form-item>
             <el-form-item label="排序字段">
-              <el-select v-model="form.sortField" clearable placeholder="默认 row_id">
+              <el-select v-model="form.sortField" class="form-select-wide" clearable placeholder="默认 row_id">
                 <el-option
                   v-for="column in metadata"
                   :key="column.fieldId"
@@ -723,7 +725,7 @@ onBeforeUnmount(() => {
               </el-select>
             </el-form-item>
             <el-form-item label="排序方向">
-              <el-select v-model="form.sortOrder">
+              <el-select v-model="form.sortOrder" class="form-select-narrow">
                 <el-option label="ASC" value="ASC" />
                 <el-option label="DESC" value="DESC" />
               </el-select>
@@ -742,7 +744,7 @@ onBeforeUnmount(() => {
           >
             <el-form inline>
               <el-form-item :label="`条件 ${index + 1} 字段`">
-                <el-select v-model="condition.field" placeholder="请选择字段">
+                <el-select v-model="condition.field" class="form-select-wide" placeholder="请选择字段">
                   <el-option
                     v-for="column in metadata"
                     :key="column.fieldId"
@@ -752,7 +754,7 @@ onBeforeUnmount(() => {
                 </el-select>
               </el-form-item>
               <el-form-item label="操作符">
-                <el-select v-model="condition.operator" @change="handleConditionOperatorChange(condition)">
+                <el-select v-model="condition.operator" class="form-select-medium" @change="handleConditionOperatorChange(condition)">
                   <el-option
                     v-for="item in filterOperators"
                     :key="item.value"
@@ -780,7 +782,7 @@ onBeforeUnmount(() => {
                 />
               </el-form-item>
               <el-form-item v-else label="条件值">
-                <el-input v-model="condition.value" placeholder="请输入条件值" />
+                <el-input v-model="condition.value" class="form-input-wide" placeholder="请输入条件值" />
               </el-form-item>
               <el-form-item>
                 <el-button
@@ -801,8 +803,8 @@ onBeforeUnmount(() => {
             placeholder="SELECT * FROM dataset LIMIT 20"
           />
           <div class="action-row">
-            <el-input v-model="form.sqlSortField" placeholder="SQL 排序字段（可选）" style="width: 220px;" />
-            <el-select v-model="form.sqlSortOrder" style="width: 120px;">
+            <el-input v-model="form.sqlSortField" class="form-input-medium" placeholder="SQL 排序字段（可选）" />
+            <el-select v-model="form.sqlSortOrder" class="form-select-narrow">
               <el-option label="ASC" value="ASC" />
               <el-option label="DESC" value="DESC" />
             </el-select>
@@ -834,15 +836,19 @@ onBeforeUnmount(() => {
 
           <section class="stat-grid notice-box">
             <el-card shadow="hover">
-              <p class="stat-label">记录数</p>
+              <p class="stat-label">数据集总记录数</p>
               <p class="stat-value">{{ summary.recordCount }}</p>
             </el-card>
             <el-card shadow="hover">
-              <p class="stat-label">空值数</p>
+              <p class="stat-label">当前命中记录数</p>
+              <p class="stat-value">{{ currentQueryMatchCount }}</p>
+            </el-card>
+            <el-card shadow="hover">
+              <p class="stat-label">数据集空值数</p>
               <p class="stat-value">{{ summary.nullCount }}</p>
             </el-card>
             <el-card shadow="hover">
-              <p class="stat-label">重复行数</p>
+              <p class="stat-label">数据集重复行数</p>
               <p class="stat-value">{{ summary.duplicateCount }}</p>
             </el-card>
           </section>
@@ -853,6 +859,7 @@ onBeforeUnmount(() => {
                 <div class="card-header">
                   <span>查询结果</span>
                   <div>
+                    <span class="inline-tip">当前页 {{ currentQueryPageCount }} 条 / 命中 {{ currentQueryMatchCount }} 条</span>
                     <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('csv')">导出 CSV</el-button>
                     <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('json')">导出 JSON</el-button>
                     <el-button link type="primary" :disabled="!canExportQuery" @click="exportRows('xlsx')">导出 Excel</el-button>
@@ -893,7 +900,7 @@ onBeforeUnmount(() => {
         <el-tab-pane label="电商指标" name="metric">
           <el-form inline>
             <el-form-item label="数据集">
-              <el-select v-model="metricForm.datasetId" :disabled="linkMetricWithQuery" placeholder="请选择数据集">
+              <el-select v-model="metricForm.datasetId" class="form-select-xl" :disabled="linkMetricWithQuery" placeholder="请选择数据集">
                 <el-option
                   v-for="dataset in datasets"
                   :key="dataset.datasetId"
@@ -906,7 +913,7 @@ onBeforeUnmount(() => {
               <el-switch v-model="linkMetricWithQuery" />
             </el-form-item>
             <el-form-item label="指标类型">
-              <el-select v-model="metricForm.metricType">
+              <el-select v-model="metricForm.metricType" class="form-select-wide">
                 <el-option label="订单量趋势" value="ORDER_TREND" />
                 <el-option label="销售额趋势" value="SALES_TREND" />
                 <el-option label="热销商品排行" value="TOP_PRODUCTS" />
@@ -986,7 +993,7 @@ onBeforeUnmount(() => {
         <el-tab-pane label="数据集成" name="integration">
           <el-form inline>
             <el-form-item label="左数据集">
-              <el-select v-model="integrationForm.leftDatasetId" placeholder="请选择左侧数据集">
+              <el-select v-model="integrationForm.leftDatasetId" class="form-select-xl" placeholder="请选择左侧数据集">
                 <el-option
                   v-for="dataset in datasets"
                   :key="dataset.datasetId"
@@ -996,7 +1003,7 @@ onBeforeUnmount(() => {
               </el-select>
             </el-form-item>
             <el-form-item label="右数据集">
-              <el-select v-model="integrationForm.rightDatasetId" placeholder="请选择右侧数据集">
+              <el-select v-model="integrationForm.rightDatasetId" class="form-select-xl" placeholder="请选择右侧数据集">
                 <el-option
                   v-for="dataset in datasets"
                   :key="dataset.datasetId"
@@ -1006,18 +1013,18 @@ onBeforeUnmount(() => {
               </el-select>
             </el-form-item>
             <el-form-item label="集成模式">
-              <el-select v-model="integrationForm.mode">
+              <el-select v-model="integrationForm.mode" class="form-select-medium">
                 <el-option label="JOIN（关联）" value="JOIN" />
                 <el-option label="UNION（合并）" value="UNION" />
               </el-select>
             </el-form-item>
             <el-form-item label="左关联字段">
-              <el-select v-model="integrationForm.leftField" :disabled="integrationForm.mode === 'UNION'">
+              <el-select v-model="integrationForm.leftField" class="form-select-wide" :disabled="integrationForm.mode === 'UNION'">
                 <el-option v-for="field in leftMetadata" :key="field.fieldId" :label="field.fieldName" :value="field.fieldName" />
               </el-select>
             </el-form-item>
             <el-form-item label="右关联字段">
-              <el-select v-model="integrationForm.rightField" :disabled="integrationForm.mode === 'UNION'">
+              <el-select v-model="integrationForm.rightField" class="form-select-wide" :disabled="integrationForm.mode === 'UNION'">
                 <el-option v-for="field in rightMetadata" :key="field.fieldId" :label="field.fieldName" :value="field.fieldName" />
               </el-select>
             </el-form-item>
@@ -1025,10 +1032,10 @@ onBeforeUnmount(() => {
               <el-input-number v-model="integrationForm.limit" :min="1" :max="1000" />
             </el-form-item>
             <el-form-item label="输出数据集名称">
-              <el-input v-model="integrationForm.outputDatasetName" placeholder="例如 商品订单集成结果_20260327" />
+              <el-input v-model="integrationForm.outputDatasetName" class="form-input-wide" placeholder="例如 商品订单集成结果_20260327" />
             </el-form-item>
             <el-form-item label="输出业务域">
-              <el-select v-model="integrationForm.outputBusinessDomain" placeholder="请选择业务域">
+              <el-select v-model="integrationForm.outputBusinessDomain" class="form-select-wide" placeholder="请选择业务域">
                 <el-option
                   v-for="domain in businessDomainOptions"
                   :key="domain.value"

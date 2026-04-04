@@ -28,6 +28,7 @@ export type DataSource = {
   username?: string | null;
   status: 'ENABLED' | 'DISABLED' | string;
   description?: string | null;
+  warningMessage?: string | null;
 };
 
 export type ImportHistory = {
@@ -340,11 +341,19 @@ export function listDataSources() {
   return apiGet<DataSource[]>('/data-sources');
 }
 
-export function createDataSource(payload: Partial<DataSource> & { sourceName: string; sourceType: string }) {
+export function createDataSource(payload: Partial<DataSource> & {
+  sourceName: string;
+  sourceType: string;
+  duplicateConnectionStrategy?: 'ALLOW' | 'WARN' | 'REJECT';
+}) {
   return apiPost<DataSource>('/data-sources', payload);
 }
 
-export function updateDataSource(sourceId: number, payload: Partial<DataSource> & { sourceName: string; sourceType: string }) {
+export function updateDataSource(sourceId: number, payload: Partial<DataSource> & {
+  sourceName: string;
+  sourceType: string;
+  duplicateConnectionStrategy?: 'ALLOW' | 'WARN' | 'REJECT';
+}) {
   return apiPut<DataSource>(`/data-sources/${sourceId}`, payload);
 }
 
@@ -393,6 +402,10 @@ export function importDatabase(payload: {
 
 export function listDatabaseTables(sourceId: number, schemaName?: string) {
   return apiGet<DatabaseTableOption[]>('/imports/database/tables', { sourceId, schemaName });
+}
+
+export function listDatabaseSchemas(sourceId: number) {
+  return apiGet<string[]>('/imports/database/schemas', { sourceId });
 }
 
 export function previewDatabaseTable(sourceId: number, tableName: string, schemaName?: string, limit = 10) {

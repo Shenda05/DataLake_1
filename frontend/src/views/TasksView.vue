@@ -358,6 +358,10 @@ function latestLog(taskId: number) {
   return latestLogByTask.value.get(taskId);
 }
 
+function taskRowClassName({ row }: { row: TaskSummary }) {
+  return row.taskId === editingTaskId.value ? 'current-row-highlight' : '';
+}
+
 function formatTaskType(taskType: string) {
   return taskType === 'GOVERNANCE' ? '治理任务' : taskType === 'IMPORT' ? '导入任务' : taskType;
 }
@@ -726,20 +730,20 @@ onBeforeUnmount(() => {
           <el-input v-model="filters.keyword" placeholder="任务名 / 目标 / 说明" />
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="filters.status" clearable placeholder="全部状态">
+          <el-select v-model="filters.status" class="form-select-medium" clearable placeholder="全部状态">
             <el-option label="ENABLED" value="ENABLED" />
             <el-option label="PAUSED" value="PAUSED" />
             <el-option label="RUNNING" value="RUNNING" />
           </el-select>
         </el-form-item>
         <el-form-item label="类型">
-          <el-select v-model="filters.taskType" clearable placeholder="全部类型">
+          <el-select v-model="filters.taskType" class="form-select-medium" clearable placeholder="全部类型">
             <el-option label="GOVERNANCE" value="GOVERNANCE" />
             <el-option label="IMPORT" value="IMPORT" />
           </el-select>
         </el-form-item>
         <el-form-item label="执行目标">
-          <el-select v-model="filters.targetId" clearable placeholder="全部目标">
+          <el-select v-model="filters.targetId" class="form-select-wide" clearable placeholder="全部目标">
             <el-option
               v-for="item in taskTargetOptions"
               :key="item.value"
@@ -801,13 +805,13 @@ onBeforeUnmount(() => {
           <el-input v-model="form.taskName" placeholder="例如 每日订单导入任务" :disabled="!canManageTasks" />
         </el-form-item>
         <el-form-item label="任务类型">
-          <el-select v-model="form.taskType" :disabled="!canManageTasks" @change="form.targetId = targetOptions[0]?.value">
+          <el-select v-model="form.taskType" class="form-select-medium" :disabled="!canManageTasks" @change="form.targetId = targetOptions[0]?.value">
             <el-option label="GOVERNANCE" value="GOVERNANCE" />
             <el-option label="IMPORT" value="IMPORT" />
           </el-select>
         </el-form-item>
         <el-form-item label="执行目标">
-          <el-select v-model="form.targetId" placeholder="请选择目标" :disabled="!canManageTasks || !hasTargetOptions">
+          <el-select v-model="form.targetId" class="form-select-xl" placeholder="请选择目标" :disabled="!canManageTasks || !hasTargetOptions">
             <el-option
               v-for="item in targetOptions"
               :key="item.value"
@@ -823,7 +827,7 @@ onBeforeUnmount(() => {
           <el-input-number v-model="form.retryPolicy" :min="1" :max="5" class="full-width" :disabled="!canManageTasks" />
         </el-form-item>
         <el-form-item label="初始状态">
-          <el-select v-model="form.status" :disabled="!canManageTasks">
+          <el-select v-model="form.status" class="form-select-medium" :disabled="!canManageTasks">
             <el-option label="ENABLED" value="ENABLED" />
             <el-option label="PAUSED" value="PAUSED" />
           </el-select>
@@ -857,7 +861,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
-      <el-table :data="filteredTasks" stripe @row-click="(row: TaskSummary) => loadTask(row)">
+      <el-table :data="filteredTasks" stripe :row-class-name="taskRowClassName" @row-click="(row: TaskSummary) => loadTask(row)">
         <el-table-column prop="taskName" label="任务名称" />
         <el-table-column label="类型" width="120">
           <template #default="{ row }">
