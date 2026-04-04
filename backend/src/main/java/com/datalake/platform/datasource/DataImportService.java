@@ -7,6 +7,7 @@ import com.datalake.platform.dataset.DatasetService;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,6 +42,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class DataImportService {
 
     private static final String DATABASE_IMPORT_PREFIX = "dbimport://";
+    private static final String FILE_IMPORT_PREFIX = "fileimport://";
     private static final Pattern IDENTIFIER_PATTERN = Pattern.compile("^[A-Za-z0-9_]+$");
 
     private final JdbcTemplate jdbcTemplate;
@@ -63,9 +65,18 @@ public class DataImportService {
         this.storageRoot = Path.of(storageRoot).toAbsolutePath().normalize();
     }
 
-    public ImportResult importFile(MultipartFile file, String datasetName, String businessDomain, Long sourceId, Long userId) throws IOException {
+    public ImportResult importFile(
+        MultipartFile file,
+        String datasetName,
+        String businessDomain,
+        Long sourceId,
+        String encoding,
+        boolean headerRow,
+        Long userId
+    ) throws IOException {
         ensureSourceEnabled(sourceId);
         String normalizedDomain = BusinessDomainCatalog.normalize(businessDomain);
+        FileParserService.ParseOptions parseOptions = new FileParserService.ParseOptions(normalizeEncoding(encoding), headerRow);
         String originalFilename = file.getOriginalFilename();
         if (originalFilename == null) {
             throw new IllegalArgumentException("文件名不能为空");
@@ -78,7 +89,7 @@ public class DataImportService {
         file.transferTo(target);
 
         try {
-            FileParserService.ParsedFile parsedFile = fileParserService.parse(target, originalFilename, detectFormat(originalFilename));
+            FileParserService.ParsedFile parsedFile = fileParserService.parse(target, originalFilename, detectFormat(originalFilename), parseOptions);
             DatasetService.CreatedDataset dataset = datasetService.createImportedDataset(
                 sourceId,
                 datasetName,
@@ -96,7 +107,7 @@ public class DataImportService {
                 normalizedDomain,
                 parsedFile.formatType(),
                 originalFilename,
-                target.toString(),
+                buildFileImportPath(target, parseOptions),
                 "SUCCESS",
                 parsedFile.rows().size(),
                 null,
@@ -113,7 +124,18 @@ public class DataImportService {
                 ""
             );
         } catch (Exception exception) {
-            insertImportRecord(sourceId, datasetName, normalizedDomain, detectFormat(originalFilename), originalFilename, target.toString(), "FAILED", 0, exception.getMessage(), userId);
+            insertImportRecord(
+                sourceId,
+                datasetName,
+                normalizedDomain,
+                detectFormat(originalFilename),
+                originalFilename,
+                buildFileImportPath(target, parseOptions),
+                "FAILED",
+                0,
+                exception.getMessage(),
+                userId
+            );
             throw new IllegalArgumentException("导入失败: " + exception.getMessage(), exception);
         }
     }
@@ -178,13 +200,19 @@ public class DataImportService {
         if (detail.filePath().startsWith(DATABASE_IMPORT_PREFIX)) {
             return rerunDatabaseImport(detail, userId, triggerName);
         }
-        Path path = Path.of(detail.filePath()).toAbsolutePath().normalize();
+        FileImportLocation fileImportLocation = parseFileImportLocation(detail.filePath(), detail.originalFileName(), detail.formatType());
+        Path path = Path.of(fileImportLocation.path()).toAbsolutePath().normalize();
         if (!Files.exists(path)) {
             throw new IllegalArgumentException("导入源文件不存在: " + path);
         }
         String datasetName = buildRerunDatasetName(detail.datasetName(), triggerName);
         try {
-            FileParserService.ParsedFile parsedFile = fileParserService.parse(path, detail.originalFileName(), detail.formatType());
+            FileParserService.ParsedFile parsedFile = fileParserService.parse(
+                path,
+                detail.originalFileName(),
+                detail.formatType(),
+                fileImportLocation.parseOptions()
+            );
             DatasetService.CreatedDataset dataset = datasetService.createImportedDataset(
                 detail.sourceId(),
                 datasetName,
@@ -202,7 +230,7 @@ public class DataImportService {
                 detail.businessDomain(),
                 parsedFile.formatType(),
                 detail.originalFileName(),
-                path.toString(),
+                buildFileImportPath(path, fileImportLocation.parseOptions()),
                 "SUCCESS",
                 parsedFile.rows().size(),
                 null,
@@ -225,7 +253,7 @@ public class DataImportService {
                 detail.businessDomain(),
                 detail.formatType(),
                 detail.originalFileName(),
-                path.toString(),
+                buildFileImportPath(path, fileImportLocation.parseOptions()),
                 "FAILED",
                 0,
                 exception.getMessage(),
@@ -633,8 +661,8 @@ public class DataImportService {
         params.put("status", status);
         params.put("recordCount", recordCount);
         params.put("originalFileName", originalFileName);
-        params.put("storagePath", filePath);
         if (filePath != null && filePath.startsWith(DATABASE_IMPORT_PREFIX)) {
+            params.put("storagePath", filePath);
             params.put("importMode", "DATABASE_TABLE");
             try {
                 DatabaseImportPath dbPath = parseDatabaseImportPath(filePath);
@@ -643,7 +671,19 @@ public class DataImportService {
             } catch (Exception exception) {
                 params.put("databasePathParseError", exception.getMessage());
             }
+        } else if (filePath != null && filePath.startsWith(FILE_IMPORT_PREFIX)) {
+            params.put("importMode", "FILE_UPLOAD");
+            try {
+                FileImportLocation fileImport = parseFileImportLocation(filePath, originalFileName, formatType);
+                params.put("storagePath", fileImport.path());
+                params.put("encoding", fileImport.parseOptions().encoding());
+                params.put("headerRow", fileImport.parseOptions().headerRow());
+            } catch (Exception exception) {
+                params.put("storagePath", filePath);
+                params.put("fileImportParseError", exception.getMessage());
+            }
         } else {
+            params.put("storagePath", filePath);
             params.put("importMode", "FILE_UPLOAD");
         }
         return params;
@@ -658,6 +698,15 @@ public class DataImportService {
             return "JSON";
         }
         return "EXCEL";
+    }
+
+    private String normalizeEncoding(String encoding) {
+        String candidate = encoding == null || encoding.isBlank() ? StandardCharsets.UTF_8.name() : encoding.trim();
+        try {
+            return Charset.forName(candidate).name();
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("不支持的编码方式: " + candidate, exception);
+        }
     }
 
     private String buildRerunDatasetName(String datasetName, String triggerName) {
@@ -723,6 +772,15 @@ public class DataImportService {
             + URLEncoder.encode(tableName, StandardCharsets.UTF_8);
     }
 
+    private String buildFileImportPath(Path actualPath, FileParserService.ParseOptions parseOptions) {
+        return FILE_IMPORT_PREFIX
+            + URLEncoder.encode(parseOptions.encoding(), StandardCharsets.UTF_8)
+            + "/"
+            + parseOptions.headerRow()
+            + "/"
+            + URLEncoder.encode(actualPath.toAbsolutePath().normalize().toString(), StandardCharsets.UTF_8);
+    }
+
     private DatabaseImportPath parseDatabaseImportPath(String filePath) {
         String raw = filePath.substring(DATABASE_IMPORT_PREFIX.length());
         String[] parts = raw.split("/", 3);
@@ -736,8 +794,36 @@ public class DataImportService {
         );
     }
 
+    private FileImportLocation parseFileImportLocation(String filePath, String originalFileName, String formatType) {
+        if (filePath == null || filePath.isBlank()) {
+            throw new IllegalArgumentException("文件导入路径为空");
+        }
+        if (!filePath.startsWith(FILE_IMPORT_PREFIX)) {
+            return new FileImportLocation(filePath, new FileParserService.ParseOptions(StandardCharsets.UTF_8.name(), true));
+        }
+        String raw = filePath.substring(FILE_IMPORT_PREFIX.length());
+        String[] parts = raw.split("/", 3);
+        if (parts.length != 3) {
+            throw new IllegalArgumentException("文件导入路径格式错误: " + filePath);
+        }
+        String encoding = normalizeEncoding(URLDecoder.decode(parts[0], StandardCharsets.UTF_8));
+        boolean headerRow = Boolean.parseBoolean(parts[1]);
+        String actualPath = URLDecoder.decode(parts[2], StandardCharsets.UTF_8);
+        boolean supportsHeaderRow = supportsHeaderRow(formatType, originalFileName);
+        return new FileImportLocation(actualPath, new FileParserService.ParseOptions(encoding, supportsHeaderRow ? headerRow : true));
+    }
+
     private String buildOriginalTableName(String schemaName, String tableName) {
         return (schemaName == null || schemaName.isBlank() ? tableName : schemaName + "." + tableName);
+    }
+
+    private boolean supportsHeaderRow(String formatType, String originalFileName) {
+        String resolvedFormat = formatType;
+        if (resolvedFormat == null || resolvedFormat.isBlank()) {
+            resolvedFormat = detectFormat(originalFileName == null ? "unknown.csv" : originalFileName);
+        }
+        String normalized = resolvedFormat.trim().toUpperCase(Locale.ROOT);
+        return "CSV".equals(normalized) || "EXCEL".equals(normalized) || "XLS".equals(normalized) || "XLSX".equals(normalized);
     }
 
     public record ImportResult(
@@ -802,6 +888,9 @@ public class DataImportService {
     }
 
     private record DatabaseImportPath(Long sourceId, String schemaName, String tableName) {
+    }
+
+    private record FileImportLocation(String path, FileParserService.ParseOptions parseOptions) {
     }
 
     private record DatabaseTableSnapshot(

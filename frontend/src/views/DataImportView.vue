@@ -36,6 +36,7 @@ const databaseTables = ref<DatabaseTableOption[]>([]);
 const databasePreview = ref<DatabasePreview | null>(null);
 const dbLoading = ref(false);
 const schemaLoading = ref(false);
+type SelectedFileFormat = '' | 'CSV' | 'JSON' | 'EXCEL';
 const BUSINESS_DOMAIN_OPTIONS: { label: string; value: BusinessDomain }[] = [
   { label: '用户域', value: 'USER' },
   { label: '商品域', value: 'PRODUCT' },
@@ -45,10 +46,13 @@ const BUSINESS_DOMAIN_OPTIONS: { label: string; value: BusinessDomain }[] = [
   { label: '评价域', value: 'REVIEW' },
   { label: '行为日志域', value: 'BEHAVIOR_LOG' }
 ];
+const FILE_ENCODING_OPTIONS = ['UTF-8', 'GBK', 'GB18030'];
 const fileForm = reactive({
   sourceId: undefined as number | undefined,
   datasetName: '',
-  businessDomain: 'TRADE' as BusinessDomain
+  businessDomain: 'TRADE' as BusinessDomain,
+  encoding: 'UTF-8',
+  headerRow: true
 });
 const historyFilters = reactive({
   businessDomain: '' as '' | BusinessDomain,
@@ -71,6 +75,22 @@ const canImportDatabase = computed(() => authStore.hasAction('import.database'))
 const selectedImportParamsText = computed(() => JSON.stringify(selectedImportDetail.value?.importParams || {}, null, 2));
 const canSelectSchema = computed(() => Boolean(canImportDatabase.value && databaseForm.sourceId));
 const canSelectDatabaseTable = computed(() => Boolean(canImportDatabase.value && databaseForm.sourceId && databaseForm.schemaName));
+const selectedFileFormat = computed<SelectedFileFormat>(() => detectSelectedFileFormat(selectedFile.value));
+const supportsEncodingConfig = computed(() => selectedFileFormat.value === 'CSV');
+const supportsHeaderRowConfig = computed(() => selectedFileFormat.value === 'CSV' || selectedFileFormat.value === 'EXCEL');
+const detectedFileFormatLabel = computed(() => selectedFileFormat.value || '待选择');
+const fileImportHint = computed(() => {
+  if (selectedFileFormat.value === 'CSV') {
+    return 'CSV 导入支持自定义编码方式，并可切换“首行为表头”。';
+  }
+  if (selectedFileFormat.value === 'EXCEL') {
+    return 'Excel 导入支持切换“首行为表头”；编码方式由表格文件本身决定。';
+  }
+  if (selectedFileFormat.value === 'JSON') {
+    return 'JSON 导入按对象数组自动解析，编码方式和表头选项会被忽略。';
+  }
+  return '支持 CSV / JSON / Excel；选择文件后会自动识别格式，并启用对应解析选项。';
+});
 
 function formatDateTime(value?: string | null) {
   if (!value) {
@@ -110,6 +130,27 @@ async function loadHistory() {
 function onFileChange(event: Event) {
   const target = event.target as HTMLInputElement;
   selectedFile.value = target.files?.[0] || null;
+  const nextFormat = detectSelectedFileFormat(selectedFile.value);
+  if (nextFormat === 'JSON') {
+    fileForm.headerRow = true;
+    fileForm.encoding = 'UTF-8';
+  } else if (nextFormat === 'EXCEL') {
+    fileForm.encoding = 'UTF-8';
+  }
+}
+
+function detectSelectedFileFormat(file: File | null): SelectedFileFormat {
+  const filename = file?.name?.toLowerCase() || '';
+  if (filename.endsWith('.csv')) {
+    return 'CSV';
+  }
+  if (filename.endsWith('.json')) {
+    return 'JSON';
+  }
+  if (filename.endsWith('.xls') || filename.endsWith('.xlsx')) {
+    return 'EXCEL';
+  }
+  return '';
 }
 
 async function submitFileImport() {
@@ -124,10 +165,14 @@ async function submitFileImport() {
     payload.append('datasetName', fileForm.datasetName);
     payload.append('businessDomain', fileForm.businessDomain);
     payload.append('sourceId', String(fileForm.sourceId));
+    payload.append('encoding', fileForm.encoding);
+    payload.append('headerRow', String(fileForm.headerRow));
     const result = await importFile(payload);
     ElMessage.success(`导入成功，生成数据集 ${result.datasetName}`);
     fileForm.datasetName = '';
     selectedFile.value = null;
+    fileForm.encoding = 'UTF-8';
+    fileForm.headerRow = true;
     await loadHistory();
   } catch (error) {
     ElMessage.error(`导入失败: ${(error as Error).message}`);
@@ -453,6 +498,28 @@ onMounted(async () => {
                     />
                   </el-select>
                 </el-form-item>
+                <el-form-item label="文件格式">
+                  <el-input :model-value="detectedFileFormatLabel" disabled />
+                </el-form-item>
+                <el-form-item label="编码方式">
+                  <el-select
+                    v-model="fileForm.encoding"
+                    class="form-select-wide"
+                    :disabled="!supportsEncodingConfig"
+                    placeholder="CSV 默认 UTF-8"
+                  >
+                    <el-option v-for="encoding in FILE_ENCODING_OPTIONS" :key="encoding" :label="encoding" :value="encoding" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="首行为表头">
+                  <el-switch
+                    v-model="fileForm.headerRow"
+                    inline-prompt
+                    active-text="是"
+                    inactive-text="否"
+                    :disabled="!supportsHeaderRowConfig"
+                  />
+                </el-form-item>
                 <el-form-item label="上传文件">
                   <input type="file" accept=".csv,.json,.xls,.xlsx" @change="onFileChange" />
                 </el-form-item>
@@ -461,7 +528,7 @@ onMounted(async () => {
             </div>
             <el-alert
               title="文件导入支持 CSV / JSON / Excel"
-              description="导入完成后会自动生成数据集、元数据和物理数据表。"
+              :description="fileImportHint"
               type="info"
               :closable="false"
             />

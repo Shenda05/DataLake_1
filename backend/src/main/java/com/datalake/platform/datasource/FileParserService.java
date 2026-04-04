@@ -7,6 +7,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,46 +35,61 @@ public class FileParserService {
     public ParsedFile parse(MultipartFile file) throws IOException {
         String filename = requireFilename(file.getOriginalFilename());
         try (InputStream inputStream = file.getInputStream()) {
-            return parse(inputStream, filename);
+            return parse(inputStream, filename, defaultParseOptions());
         }
     }
 
     public ParsedFile parse(Path path, String originalFilename, String formatType) throws IOException {
+        return parse(path, originalFilename, formatType, defaultParseOptions());
+    }
+
+    public ParsedFile parse(Path path, String originalFilename, String formatType, ParseOptions options) throws IOException {
         try (InputStream inputStream = Files.newInputStream(path)) {
-            return parse(inputStream, originalFilename == null ? "unknown." + formatType.toLowerCase() : originalFilename);
+            return parse(
+                inputStream,
+                originalFilename == null ? "unknown." + formatType.toLowerCase() : originalFilename,
+                options == null ? defaultParseOptions() : options
+            );
         }
     }
 
-    private ParsedFile parse(InputStream inputStream, String filename) throws IOException {
+    private ParsedFile parse(InputStream inputStream, String filename, ParseOptions options) throws IOException {
         String lower = filename.toLowerCase();
         if (lower.endsWith(".csv")) {
-            return parseCsv(inputStream);
+            return parseCsv(inputStream, options);
         }
         if (lower.endsWith(".json")) {
             return parseJson(inputStream);
         }
         if (lower.endsWith(".xls") || lower.endsWith(".xlsx")) {
-            return parseExcel(inputStream);
+            return parseExcel(inputStream, options);
         }
         throw new IllegalArgumentException("暂不支持的文件格式: " + filename);
     }
 
-    private ParsedFile parseCsv(InputStream inputStream) throws IOException {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
-            List<String> lines = reader.lines().filter(line -> !line.isBlank()).toList();
-            if (lines.isEmpty()) {
+    private ParsedFile parseCsv(InputStream inputStream, ParseOptions options) throws IOException {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, resolveCharset(options)))) {
+            List<String[]> values = reader.lines()
+                .filter(line -> !line.isBlank())
+                .map(line -> line.split(",", -1))
+                .toList();
+            if (values.isEmpty()) {
                 throw new IllegalArgumentException("CSV 文件为空");
             }
-            String[] headers = lines.get(0).split(",");
+            boolean headerRow = options == null || options.headerRow();
+            String[] headers = headerRow ? values.get(0) : buildSyntheticHeaders(maxColumnCount(values));
             List<Map<String, Object>> rows = new ArrayList<>();
-            for (int i = 1; i < lines.size(); i++) {
-                String[] values = lines.get(i).split(",", -1);
+            for (int i = headerRow ? 1 : 0; i < values.size(); i++) {
+                String[] rowValues = values.get(i);
                 Map<String, Object> row = new LinkedHashMap<>();
                 for (int j = 0; j < headers.length; j++) {
                     String header = headers[j].trim();
-                    row.put(header, j < values.length ? values[j].trim() : "");
+                    row.put(header.isBlank() ? "column_" + (j + 1) : header, j < rowValues.length ? rowValues[j].trim() : "");
                 }
                 rows.add(row);
+            }
+            if (rows.isEmpty()) {
+                throw new IllegalArgumentException("CSV 数据为空");
             }
             return new ParsedFile("CSV", inferColumns(rows), rows);
         }
@@ -92,18 +108,37 @@ public class FileParserService {
         return new ParsedFile("JSON", inferColumns(rows), rows);
     }
 
-    private ParsedFile parseExcel(InputStream inputStream) throws IOException {
+    private ParsedFile parseExcel(InputStream inputStream, ParseOptions options) throws IOException {
         try (var workbook = WorkbookFactory.create(inputStream)) {
             Sheet sheet = workbook.getSheetAt(0);
-            Row headerRow = sheet.getRow(sheet.getFirstRowNum());
-            if (headerRow == null) {
-                throw new IllegalArgumentException("Excel 表头为空");
-            }
             DataFormatter formatter = new DataFormatter();
             List<String> headers = new ArrayList<>();
-            headerRow.forEach(cell -> headers.add(formatter.formatCellValue(cell).trim()));
+            boolean headerRow = options == null || options.headerRow();
+            int startRowNum = sheet.getFirstRowNum();
+            if (headerRow) {
+                Row actualHeaderRow = sheet.getRow(sheet.getFirstRowNum());
+                if (actualHeaderRow == null) {
+                    throw new IllegalArgumentException("Excel 表头为空");
+                }
+                actualHeaderRow.forEach(cell -> headers.add(formatter.formatCellValue(cell).trim()));
+                startRowNum = sheet.getFirstRowNum() + 1;
+            } else {
+                int maxColumns = 0;
+                for (int rowIndex = sheet.getFirstRowNum(); rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+                    Row row = sheet.getRow(rowIndex);
+                    if (row != null) {
+                        maxColumns = Math.max(maxColumns, Math.max(row.getLastCellNum(), 0));
+                    }
+                }
+                if (maxColumns <= 0) {
+                    throw new IllegalArgumentException("Excel 数据为空");
+                }
+                for (String header : buildSyntheticHeaders(maxColumns)) {
+                    headers.add(header);
+                }
+            }
             List<Map<String, Object>> rows = new ArrayList<>();
-            for (int i = sheet.getFirstRowNum() + 1; i <= sheet.getLastRowNum(); i++) {
+            for (int i = startRowNum; i <= sheet.getLastRowNum(); i++) {
                 Row rowData = sheet.getRow(i);
                 if (rowData == null) {
                     continue;
@@ -185,6 +220,37 @@ public class FileParserService {
         return filename;
     }
 
+    private ParseOptions defaultParseOptions() {
+        return new ParseOptions(StandardCharsets.UTF_8.name(), true);
+    }
+
+    private Charset resolveCharset(ParseOptions options) {
+        String encoding = options == null || options.encoding() == null || options.encoding().isBlank()
+            ? StandardCharsets.UTF_8.name()
+            : options.encoding().trim();
+        try {
+            return Charset.forName(encoding);
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("不支持的编码方式: " + encoding, exception);
+        }
+    }
+
+    private int maxColumnCount(List<String[]> values) {
+        int max = 0;
+        for (String[] row : values) {
+            max = Math.max(max, row.length);
+        }
+        return max;
+    }
+
+    private String[] buildSyntheticHeaders(int columnCount) {
+        String[] headers = new String[columnCount];
+        for (int index = 0; index < columnCount; index++) {
+            headers[index] = "column_" + (index + 1);
+        }
+        return headers;
+    }
+
     public record ParsedFile(String formatType, List<ParsedColumn> columns, List<Map<String, Object>> rows) {
     }
 
@@ -196,5 +262,8 @@ public class FileParserService {
         String sampleValue,
         int fieldOrder
     ) {
+    }
+
+    public record ParseOptions(String encoding, boolean headerRow) {
     }
 }

@@ -40,7 +40,8 @@
 
 ### 数据导入
 
-- `POST /api/imports/file`
+- `POST /api/imports/file`  
+  可选表单字段：`encoding/headerRow`
 - `POST /api/imports/database`
 - `GET /api/imports/database/schemas`
 - `GET /api/imports/database/tables`

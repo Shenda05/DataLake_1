@@ -33,6 +33,8 @@ public class DataImportController {
         @RequestParam("datasetName") @NotBlank String datasetName,
         @RequestParam(value = "businessDomain", required = false) String businessDomain,
         @RequestParam("sourceId") Long sourceId,
+        @RequestParam(value = "encoding", required = false) String encoding,
+        @RequestParam(value = "headerRow", required = false, defaultValue = "true") boolean headerRow,
         HttpServletRequest request
     ) {
         if (file.isEmpty()) {
@@ -40,7 +42,7 @@ public class DataImportController {
         }
         try {
             return ApiResponse.success(
-                dataImportService.importFile(file, datasetName, businessDomain, sourceId, SecurityUtils.currentUser().userId()),
+                dataImportService.importFile(file, datasetName, businessDomain, sourceId, encoding, headerRow, SecurityUtils.currentUser().userId()),
                 requestId(request)
             );
         } catch (Exception exception) {

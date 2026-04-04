@@ -13,7 +13,7 @@ import {
 } from '../api/platform';
 import { useAuthStore } from '../stores/auth';
 
-type MenuRoute = 'imports' | 'datasets' | 'governance' | 'tasks' | 'logs' | 'queries';
+type MenuRoute = 'dashboard' | 'data-sources' | 'imports' | 'datasets' | 'governance' | 'tasks' | 'logs' | 'queries';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -51,6 +51,16 @@ const successRate = computed(() => {
 
 const orderTotal7d = computed(() => Math.round(ecommerce.value.orderTrend.reduce((sum, item) => sum + item.value, 0)));
 const salesTotal7d = computed(() => Math.round(ecommerce.value.salesTrend.reduce((sum, item) => sum + item.value, 0) * 100) / 100);
+const dashboardStats = computed(() => [
+  { label: '数据集总数', value: overview.value.datasets, target: 'datasets' as MenuRoute, hint: '点击查看数据集列表' },
+  { label: '数据源总数', value: overview.value.dataSources, target: 'data-sources' as MenuRoute, hint: '点击查看数据源管理' },
+  { label: '调度任务数', value: overview.value.totalTasks, target: 'tasks' as MenuRoute, hint: '点击查看任务调度' },
+  { label: '最近失败任务数', value: overview.value.recentFailedTasks, target: 'logs' as MenuRoute, hint: '点击查看失败日志' },
+  { label: '近 7 天订单量', value: orderTotal7d.value, target: 'queries' as MenuRoute, hint: '点击进入查询分析' },
+  { label: '近 7 天销售额', value: salesTotal7d.value, target: 'queries' as MenuRoute, hint: '点击进入查询分析' },
+  { label: '低库存商品数', value: ecommerce.value.lowStockCount, target: 'queries' as MenuRoute, hint: '点击查看库存分析' },
+  { label: '任务成功率', value: successRate.value, target: 'tasks' as MenuRoute, hint: '点击查看任务状态' }
+]);
 
 const latestStatus = computed(() => {
   if (!recentLogs.value.length) {
@@ -94,11 +104,13 @@ function formatTaskType(taskType: string) {
 function menuLabel(name: MenuRoute) {
   const labels: Record<MenuRoute, string> = {
     imports: '电商数据接入',
+    'data-sources': '数据源管理',
     datasets: '电商数据集',
     governance: '电商数据治理',
     tasks: '电商任务调度',
     logs: '任务与日志',
-    queries: '电商查询分析'
+    queries: '电商查询分析',
+    dashboard: '电商仪表盘'
   };
   return labels[name];
 }
@@ -122,11 +134,16 @@ function goTo(name: MenuRoute) {
   void router.push({ name });
 }
 
+function handleTrendJump() {
+  goTo('queries');
+}
+
 async function renderTrendChart() {
   await nextTick();
   if (!trendChartRef.value) return;
   if (!trendChart) {
     trendChart = echarts.init(trendChartRef.value);
+    trendChart.on('click', handleTrendJump);
   }
   trendChart.setOption({
     tooltip: { trigger: 'axis' },
@@ -231,42 +248,21 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="stat-grid">
-      <el-card shadow="hover">
-        <p class="stat-label">数据集总数</p>
-        <p class="stat-value">{{ overview.datasets }}</p>
-      </el-card>
-      <el-card shadow="hover">
-        <p class="stat-label">数据源总数</p>
-        <p class="stat-value">{{ overview.dataSources }}</p>
-      </el-card>
-      <el-card shadow="hover">
-        <p class="stat-label">调度任务数</p>
-        <p class="stat-value">{{ overview.totalTasks }}</p>
-      </el-card>
-      <el-card shadow="hover">
-        <p class="stat-label">最近失败任务数</p>
-        <p class="stat-value">{{ overview.recentFailedTasks }}</p>
-      </el-card>
-      <el-card shadow="hover">
-        <p class="stat-label">近 7 天订单量</p>
-        <p class="stat-value">{{ orderTotal7d }}</p>
-      </el-card>
-      <el-card shadow="hover">
-        <p class="stat-label">近 7 天销售额</p>
-        <p class="stat-value">{{ salesTotal7d }}</p>
-      </el-card>
-      <el-card shadow="hover">
-        <p class="stat-label">低库存商品数</p>
-        <p class="stat-value">{{ ecommerce.lowStockCount }}</p>
-      </el-card>
-      <el-card shadow="hover">
-        <p class="stat-label">任务成功率</p>
-        <p class="stat-value">{{ successRate }}</p>
+      <el-card
+        v-for="item in dashboardStats"
+        :key="item.label"
+        shadow="hover"
+        class="dashboard-jump-card"
+        @click="goTo(item.target)"
+      >
+        <p class="stat-label">{{ item.label }}</p>
+        <p class="stat-value">{{ item.value }}</p>
+        <p class="stat-card-hint">{{ item.hint }}</p>
       </el-card>
     </section>
 
     <section class="two-column-grid">
-      <el-card shadow="never">
+      <el-card shadow="never" class="dashboard-jump-card" @click="handleTrendJump">
         <template #header>
           <div class="card-header">
             <span>近 7 天订单量/销售额趋势</span>
@@ -276,14 +272,14 @@ onBeforeUnmount(() => {
         <div ref="trendChartRef" class="chart-box"></div>
       </el-card>
 
-      <el-card shadow="never">
+      <el-card shadow="never" class="dashboard-jump-card" @click="goTo('queries')">
         <template #header>
           <div class="card-header">
             <span>热销商品 Top5</span>
             <el-tag>{{ ecommerce.topProducts.length }} 条</el-tag>
           </div>
         </template>
-        <el-table :data="ecommerce.topProducts" stripe>
+        <el-table :data="ecommerce.topProducts" stripe @row-click="goTo('queries')">
           <el-table-column prop="name" label="商品" />
           <el-table-column prop="value" label="销量" width="160" />
         </el-table>

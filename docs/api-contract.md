@@ -69,6 +69,7 @@
 ### 导入
 
 - `POST /api/imports/file`
+  可选表单字段：`encoding`、`headerRow`
 - `POST /api/imports/database`
 - `GET /api/imports/database/schemas`（用于数据库导入页自动识别 `Schema / Database` 下拉）
 - `GET /api/imports/database/tables`
