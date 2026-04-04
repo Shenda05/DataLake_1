@@ -158,8 +158,18 @@ source_id="$(json_get "$source_response" "data.sourceId")"
 test_response="$(request "$admin_token" POST "${BASE_URL}/data-sources/${source_id}/test")"
 check_success "$test_response" "测试 MySQL 数据源"
 
-echo "[4/9] 验证数据库表列出、预览与导入"
-tables_response="$(request "$admin_token" GET "${BASE_URL}/imports/database/tables?sourceId=${source_id}&schemaName=${MYSQL_SOURCE_SCHEMA}")"
+echo "[4/9] 验证数据库 Schema、表列出、预览与导入"
+schemas_response="$(request "$admin_token" GET "${BASE_URL}/imports/database/schemas?sourceId=${source_id}")"
+check_success "$schemas_response" "列出数据库 Schema"
+selected_schema="$(PREFERRED_SCHEMA="$MYSQL_SOURCE_SCHEMA" json_eval "$schemas_response" '
+  const payload = JSON.parse(process.argv[1]);
+  const schemas = payload.data || [];
+  const preferred = process.env.PREFERRED_SCHEMA;
+  const matched = schemas.find(item => item === preferred) || schemas[0];
+  if (!matched) process.exit(2);
+  process.stdout.write(matched);
+')"
+tables_response="$(request "$admin_token" GET "${BASE_URL}/imports/database/tables?sourceId=${source_id}&schemaName=${selected_schema}")"
 check_success "$tables_response" "列出数据库表"
 selected_table="$(json_eval "$tables_response" '
   const payload = JSON.parse(process.argv[1]);
@@ -171,12 +181,12 @@ selected_table="$(json_eval "$tables_response" '
   if (!matched) process.exit(2);
   process.stdout.write(matched.tableName);
 ')"
-preview_response="$(request "$admin_token" GET "${BASE_URL}/imports/database/preview?sourceId=${source_id}&schemaName=${MYSQL_SOURCE_SCHEMA}&tableName=${selected_table}&limit=5")"
+preview_response="$(request "$admin_token" GET "${BASE_URL}/imports/database/preview?sourceId=${source_id}&schemaName=${selected_schema}&tableName=${selected_table}&limit=5")"
 check_success "$preview_response" "预览数据库表"
 dataset_name="mysql_import_dataset_${timestamp}"
 import_payload="$(
   SOURCE_ID="$source_id" \
-  MYSQL_SOURCE_SCHEMA="$MYSQL_SOURCE_SCHEMA" \
+  MYSQL_SOURCE_SCHEMA="$selected_schema" \
   SELECTED_TABLE="$selected_table" \
   DATASET_NAME="$dataset_name" \
   node - <<'NODE'
@@ -306,6 +316,7 @@ summary_json="$(
   AFTER_LOG_COUNT="$after_log_count" \
   IMPORTED_DATASET_ID="$imported_dataset_id" \
   SOURCE_ID="$source_id" \
+  SELECTED_SCHEMA="$selected_schema" \
   SELECTED_TABLE="$selected_table" \
   node - <<'NODE'
 const dashboardAdmin = JSON.parse(process.env.DASHBOARD_ADMIN);
@@ -315,6 +326,7 @@ const operatorProfile = JSON.parse(process.env.OPERATOR_PROFILE);
 const summary = {
   sourceId: Number(process.env.SOURCE_ID),
   importedDatasetId: Number(process.env.IMPORTED_DATASET_ID),
+  importedSchema: process.env.SELECTED_SCHEMA,
   importedTable: process.env.SELECTED_TABLE,
   adminOverview: dashboardAdmin.data,
   operatorOverview: dashboardOperator.data,

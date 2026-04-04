@@ -2,8 +2,8 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8080/api}"
-USERNAME="${USERNAME:-admin}"
-PASSWORD="${PASSWORD:-admin123}"
+APP_USERNAME="${APP_USERNAME:-admin}"
+APP_PASSWORD="${APP_PASSWORD:-${PASSWORD:-admin123}}"
 STATE_FILE="${STATE_FILE:-/tmp/ecommerce-demo-smoke-state.json}"
 RUN_MYSQL="${RUN_MYSQL:-false}"
 COMMAND="${1:-all}"
@@ -79,7 +79,7 @@ api_request() {
 login() {
   print_section "login"
   local response
-  response="$(curl -sS -X POST -H 'Content-Type: application/json' -d "{\"username\":\"${USERNAME}\",\"password\":\"${PASSWORD}\"}" "${BASE_URL}/auth/login")"
+  response="$(curl -sS -X POST -H 'Content-Type: application/json' -d "{\"username\":\"${APP_USERNAME}\",\"password\":\"${APP_PASSWORD}\"}" "${BASE_URL}/auth/login")"
   check_success "$response" "登录"
   TOKEN="$(json_get "$response" "data.token")"
   echo "[OK] 登录成功"
@@ -87,13 +87,13 @@ login() {
 
 run_api_smoke() {
   print_section "api-smoke"
-  BASE_URL="$BASE_URL" USERNAME="$USERNAME" PASSWORD="$PASSWORD" bash scripts/api-smoke-test.sh
+  BASE_URL="$BASE_URL" APP_USERNAME="$APP_USERNAME" APP_PASSWORD="$APP_PASSWORD" bash scripts/api-smoke-test.sh
   echo "[OK] api-smoke 通过"
 }
 
 run_demo_smoke() {
   print_section "demo-smoke"
-  BASE_URL="$BASE_URL" USERNAME="$USERNAME" PASSWORD="$PASSWORD" STATE_FILE="$STATE_FILE" bash scripts/ecommerce-demo-smoke.sh all
+  BASE_URL="$BASE_URL" APP_USERNAME="$APP_USERNAME" APP_PASSWORD="$APP_PASSWORD" STATE_FILE="$STATE_FILE" bash scripts/ecommerce-demo-smoke.sh all
   echo "[OK] demo-smoke 通过"
 }
 
@@ -101,6 +101,57 @@ run_mysql_regression() {
   print_section "mysql-regression"
   BASE_URL="$BASE_URL" bash scripts/mysql-regression-check.sh
   echo "[OK] mysql-regression 通过"
+}
+
+extended_data_source_dedup_checks() {
+  print_section "extended-data-source-dedup-checks"
+  local suffix base_name base_response base_id same_name_response warn_name warn_response warn_id reject_name reject_response
+  suffix="$(date +%Y%m%d%H%M%S)_$RANDOM"
+  base_name="round8_mysql_source_${suffix}"
+
+  base_response="$(api_request POST '/data-sources' "{\"sourceName\":\"${base_name}\",\"sourceType\":\"MYSQL\",\"host\":\"127.0.0.1\",\"port\":3306,\"dbName\":\"data_lake_platform\",\"username\":\"root\",\"password\":\"root\",\"description\":\"round8 dedup base source\"}")"
+  check_success "$base_response" "创建基准 MYSQL 数据源"
+  base_id="$(json_get "$base_response" "data.sourceId")"
+
+  same_name_response="$(api_request POST '/data-sources' "{\"sourceName\":\"${base_name}\",\"sourceType\":\"MYSQL\",\"host\":\"127.0.0.1\",\"port\":3307,\"dbName\":\"data_lake_platform_shadow\",\"username\":\"root\",\"password\":\"root\",\"description\":\"round8 duplicated name\"}")"
+  check_failed "$same_name_response" "同名数据源拦截"
+  node -e '
+    const payload = JSON.parse(process.argv[1]);
+    const message = String(payload.message || "");
+    if (!message.includes("数据源名称已存在")) process.exit(2);
+  ' "$same_name_response" || {
+    echo "[ERROR] 同名数据源失败提示不符合预期" >&2
+    exit 1
+  }
+
+  warn_name="round8_mysql_warn_${suffix}"
+  warn_response="$(api_request POST '/data-sources' "{\"sourceName\":\"${warn_name}\",\"sourceType\":\"MYSQL\",\"host\":\"127.0.0.1\",\"port\":3306,\"dbName\":\"data_lake_platform\",\"username\":\"root\",\"password\":\"root\",\"description\":\"round8 duplicated connection warn\",\"duplicateConnectionStrategy\":\"WARN\"}")"
+  check_success "$warn_response" "重复连接 WARN 策略"
+  warn_id="$(json_get "$warn_response" "data.sourceId")"
+  node -e '
+    const payload = JSON.parse(process.argv[1]);
+    const warning = payload.data?.warningMessage;
+    if (!warning || !String(warning).trim()) process.exit(2);
+  ' "$warn_response" || {
+    echo "[ERROR] WARN 策略未返回 warningMessage" >&2
+    exit 1
+  }
+
+  reject_name="round8_mysql_reject_${suffix}"
+  reject_response="$(api_request POST '/data-sources' "{\"sourceName\":\"${reject_name}\",\"sourceType\":\"MYSQL\",\"host\":\"127.0.0.1\",\"port\":3306,\"dbName\":\"data_lake_platform\",\"username\":\"root\",\"password\":\"root\",\"description\":\"round8 duplicated connection reject\",\"duplicateConnectionStrategy\":\"REJECT\"}")"
+  check_failed "$reject_response" "重复连接 REJECT 策略"
+  node -e '
+    const payload = JSON.parse(process.argv[1]);
+    const message = String(payload.message || "");
+    if (!message.includes("相同 MYSQL 连接配置")) process.exit(2);
+  ' "$reject_response" || {
+    echo "[ERROR] REJECT 策略失败提示不符合预期" >&2
+    exit 1
+  }
+
+  check_success "$(api_request DELETE "/data-sources/${warn_id}")" "删除 WARN 测试数据源"
+  check_success "$(api_request DELETE "/data-sources/${base_id}")" "删除基准测试数据源"
+  echo "[OK] 数据源重复策略检查通过"
 }
 
 extended_dataset_checks() {
@@ -200,7 +251,7 @@ extended_log_filter_checks() {
   ' "$base_logs")"
   if [[ -z "$log_id" ]]; then
     echo "[INFO] 当前无日志，尝试用 demo 脚本补数据"
-    BASE_URL="$BASE_URL" USERNAME="$USERNAME" PASSWORD="$PASSWORD" STATE_FILE="$STATE_FILE" bash scripts/ecommerce-demo-smoke.sh task-fail-log
+    BASE_URL="$BASE_URL" APP_USERNAME="$APP_USERNAME" APP_PASSWORD="$APP_PASSWORD" STATE_FILE="$STATE_FILE" bash scripts/ecommerce-demo-smoke.sh task-fail-log
     base_logs="$(api_request GET '/task-logs')"
     check_success "$base_logs" "补数后日志列表"
   fi
@@ -255,6 +306,7 @@ extended_log_filter_checks() {
 
 run_extended_checks() {
   login
+  extended_data_source_dedup_checks
   extended_dataset_checks
   extended_governance_operator_checks
   extended_log_filter_checks

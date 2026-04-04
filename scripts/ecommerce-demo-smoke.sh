@@ -2,8 +2,8 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8080/api}"
-USERNAME="${USERNAME:-admin}"
-PASSWORD="${PASSWORD:-admin123}"
+APP_USERNAME="${APP_USERNAME:-admin}"
+APP_PASSWORD="${APP_PASSWORD:-${PASSWORD:-admin123}}"
 STATE_FILE="${STATE_FILE:-/tmp/ecommerce-demo-smoke-state.json}"
 
 COMMAND="${1:-all}"
@@ -116,10 +116,10 @@ print_section() {
 login() {
   print_section "login"
   local response
-  response="$(curl -sS -X POST -H 'Content-Type: application/json' -d "{\"username\":\"${USERNAME}\",\"password\":\"${PASSWORD}\"}" "${BASE_URL}/auth/login")"
+  response="$(curl -sS -X POST -H 'Content-Type: application/json' -d "{\"username\":\"${APP_USERNAME}\",\"password\":\"${APP_PASSWORD}\"}" "${BASE_URL}/auth/login")"
   check_success "$response" "登录"
   TOKEN="$(json_get "$response" "data.token")"
-  echo "[OK] 登录成功，user=${USERNAME}"
+  echo "[OK] 登录成功，user=${APP_USERNAME}"
 }
 
 ensure_file_source() {

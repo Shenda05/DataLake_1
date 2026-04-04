@@ -1,10 +1,12 @@
-# 演示与验收 Runbook（Round 7）
+# 演示与验收 Runbook（冻结版）
 
-更新时间：`2026-03-30`
+更新时间：`2026-04-04`
 
-## 1. 目标
+## 1. 定位
 
-在最短时间内复现可答辩状态：
+这是当前仓库唯一推荐的演示准备文档，用于在最短时间内复现可答辩状态。
+
+目标结果：
 
 - 首页有可展示指标
 - 至少 1 个集成保存数据集
@@ -18,18 +20,18 @@
 - 后端（H2 或 MySQL）
 - 前端
 
-### 步骤 2：一键准备数据与主链路
+### 步骤 2：一键准备演示数据
 
 ```bash
 bash scripts/ecommerce-demo-smoke.sh all
 ```
 
-可选：
+可选环境变量：
 
 ```bash
 BASE_URL=http://127.0.0.1:8080/api \
-USERNAME=admin \
-PASSWORD=admin123 \
+APP_USERNAME=admin \
+APP_PASSWORD=admin123 \
 STATE_FILE=/tmp/ecommerce-demo-smoke-state.json \
 bash scripts/ecommerce-demo-smoke.sh all
 ```
@@ -52,20 +54,29 @@ bash scripts/ecommerce-demo-smoke.sh task-fail-log
 bash scripts/ecommerce-demo-smoke.sh log-detail
 ```
 
-## 4. 页面演示建议
+## 4. `STATE_FILE` 用途
+
+- 默认文件：`/tmp/ecommerce-demo-smoke-state.json`
+- 主要保存：`tradeDatasetId / productDatasetId / inventoryDatasetId / integrationSavedDatasetId / governanceSuccessLogId / governanceFailureLogId / failureTaskLogId`
+- 作用：支持分步命令复用前一步生成的关键 ID，避免每次都从头准备数据
+
+## 5. 页面演示顺序
 
 1. 首页：展示订单趋势、销售额趋势、Top5、低库存。
-2. 查询分析：展示条件查询、SQL 分页、数据集成并保存。
-3. 治理：先成功执行，再展示失败案例。
-4. 任务与日志：展示失败筛选、操作人、结构化失败原因、日志回放。
+2. 数据源 / 数据接入：展示 `MYSQL` 数据源、Schema 自动识别、导入历史。
+3. 数据集管理：展示业务域筛选、预览与导出。
+4. 查询分析：展示条件查询、SQL 分页、数据集成并保存。
+5. 数据治理：先展示成功执行，再展示失败案例与结构化日志。
+6. 任务与日志：展示失败筛选、操作人、结构化失败原因、日志回放。
 
-## 5. 失败回滚策略
+## 6. 失败回滚策略
 
 - 演示数据异常：删除 `STATE_FILE` 后重跑 `ecommerce-demo-smoke.sh all`。
-- 历史数据干扰：重启后端（H2）可清空；MySQL 用新时间戳数据集名重跑。
-- 局部失败：按子命令单独重跑，不需要全量重置。
+- 历史数据干扰：H2 可通过重启后端清空；MySQL 建议直接使用新的时间戳数据集名重跑。
+- 局部失败：优先按子命令单独重跑，不需要全量重置。
 
-## 6. 交付建议
+## 7. 交付建议
 
 - 把命令输出、关键 ID、截图统一归档到测试报告与答辩附录。
 - 建议记录：`datasetId / flowId / taskId / logId`，便于现场快速定位页面。
+- 若需要截图或课程附录引用，以本 Runbook 为准，不再额外维护第二套演示口径。

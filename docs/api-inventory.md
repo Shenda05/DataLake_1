@@ -1,6 +1,6 @@
-# 接口清单（Round 7 冻结版）
+# 接口清单（冻结版）
 
-更新时间：`2026-03-30`  
+更新时间：`2026-04-04`
 来源：后端 `Controller` 扫描结果（`backend/src/main/java/com/datalake/platform/**`）。
 
 ## 1. 认证与权限
@@ -32,6 +32,11 @@
 - `DELETE /api/data-sources/{sourceId}`
 - `POST /api/data-sources/{sourceId}/test`
 - `POST /api/data-sources/{sourceId}/status`
+
+补充说明：
+
+- `POST / PUT /api/data-sources` 可选字段：`duplicateConnectionStrategy`
+- 数据源保存响应可能补充：`warningMessage`
 
 ### 数据导入
 

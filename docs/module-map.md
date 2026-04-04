@@ -1,13 +1,13 @@
-# 模块与包结构说明（Round 7）
+# 模块与包结构说明（冻结版）
 
-更新时间：`2026-03-30`
+更新时间：`2026-04-04`
 
 ## 1. 仓库分层
 
 - `frontend/`：Vue 3 管理台（路由、页面、权限交互、图表展示）
 - `backend/`：Spring Boot API（认证、接入、资产、查询、治理、调度、日志）
 - `database/`：数据库 schema
-- `scripts/`：冒烟/回归/演示脚本
+- `scripts/`：冒烟 / 回归 / 演示脚本
 - `docs/`：接口、架构、测试、演示、冻结交付文档
 
 ## 2. 前端模块
@@ -52,9 +52,28 @@
 6. 调度任务：`task`
 7. 日志观测：`task`
 
-## 5. 当前边界说明
+## 5. 脚本与文档资产边界
+
+### `scripts/`
+
+- `api-smoke-test.sh`：主链路 API 基线
+- `ecommerce-demo-smoke.sh`：演示数据与答辩路径准备
+- `mysql-regression-check.sh`：MySQL 环境专项回归
+- `regression-suite.sh`：统一编排与冻结门禁
+
+### `docs/`
+
+- `api-contract.md`：接口行为与字段约定
+- `api-inventory.md`：接口目录清单
+- `db-schema-catalog.md`：表结构与字段职责
+- `user-manual.md`：用户操作路径
+- `demo-runbook.md`：演示准备唯一口径
+- `browser-regression-checklist.md`：人工浏览器回归记录
+- `freeze-gap-review-round7.md` / `freeze-release-note.md`：冻结审计与发布结论
+
+## 6. 当前边界说明
 
 - 保留通用平台骨架，业务表达电商化。
-- 当前任务类型固定 `IMPORT/GOVERNANCE`。
-- 数据集成为查询页子标签能力，不是独立任务类型。
-- 本轮不做治理/调度/查询引擎重构。
+- 当前任务类型固定 `IMPORT / GOVERNANCE`。
+- 数据集成为查询页子标签能力，不是独立任务类型或独立菜单。
+- 本轮不做治理 / 调度 / 查询引擎重构。

@@ -1,4 +1,6 @@
-# API 合同 V2（Round 7 冻结版）
+# API 合同 V2（冻结版）
+
+更新时间：`2026-04-04`
 
 ## 通用约定
 
@@ -68,7 +70,7 @@
 
 - `POST /api/imports/file`
 - `POST /api/imports/database`
-- `GET /api/imports/database/schemas`
+- `GET /api/imports/database/schemas`（用于数据库导入页自动识别 `Schema / Database` 下拉）
 - `GET /api/imports/database/tables`
 - `GET /api/imports/database/preview`
 - `GET /api/imports/history`  
