@@ -1,6 +1,6 @@
 # API 合同 V2（冻结版）
 
-更新时间：`2026-04-04`
+更新时间：`2026-04-05`
 
 ## 通用约定
 
@@ -16,6 +16,12 @@
   "requestId": "req-demo-001"
 }
 ```
+
+- 适用范围：
+  - 正常业务成功响应统一返回 `code/message/data/timestamp/requestId`
+  - 大多数参数错误会返回统一错误体
+  - 当前 `401/403` 主要由 Spring Security 直接拦截，前端以 HTTP 状态码处理
+  - 文件导出接口直接返回二进制文件流，不走 `ApiResponse`
 
 - 分页结构：
 
@@ -155,12 +161,10 @@
 - 算子状态：`ENABLED`、`DISABLED`
 - 业务域：`USER/PRODUCT/TRADE/PAYMENT/INVENTORY/REVIEW/BEHAVIOR_LOG`
 
-## 异常码建议
+## 当前实际异常码
 
 - `0`：成功
 - `40001`：参数校验失败
 - `40101`：未登录或 token 无效
 - `40301`：无权限访问
-- `40401`：资源不存在
-- `40901`：资源冲突
 - `50001`：系统内部异常
