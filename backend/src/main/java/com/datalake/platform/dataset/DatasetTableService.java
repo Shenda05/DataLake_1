@@ -29,9 +29,17 @@ public class DatasetTableService {
 
     public void createPhysicalTable(String tableName, List<DatasetService.MetaFieldRecord> columns) {
         String columnSql = columns.stream()
-            .map(column -> column.physicalColumnName() + " " + sqlType(column.fieldType()))
-            .collect(Collectors.joining(", "));
-        jdbcTemplate.execute("create table " + tableName + " (row_id bigint auto_increment primary key, " + columnSql + ")");
+                .map(column -> column.physicalColumnName() + " " + sqlType(column.fieldType()))
+                .collect(Collectors.joining(", "));
+
+        // 修复：没有字段时，不拼接多余逗号
+        StringBuilder sql = new StringBuilder("create table " + tableName + " (row_id bigint auto_increment primary key");
+        if (columnSql != null && !columnSql.isBlank()) {
+            sql.append(", ").append(columnSql);
+        }
+        sql.append(")");
+
+        jdbcTemplate.execute(sql.toString());
     }
 
     public void insertRows(String tableName, List<DatasetService.MetaFieldRecord> columns, List<Map<String, Object>> rows) {
@@ -57,40 +65,41 @@ public class DatasetTableService {
     }
 
     public PageResponse<Map<String, Object>> preview(
-        String tableName,
-        List<DatasetService.MetaFieldRecord> columns,
-        int pageNum,
-        int pageSize,
-        String field,
-        String keyword
+            String tableName,
+            List<DatasetService.MetaFieldRecord> columns,
+            int pageNum,
+            int pageSize,
+            String field,
+            String keyword
     ) {
         int offset = Math.max(pageNum - 1, 0) * pageSize;
         MapSqlParameterSource params = new MapSqlParameterSource();
         String whereClause = keywordWhereClause(columns, field, keyword, params);
         Long total = namedParameterJdbcTemplate.queryForObject("select count(*) from " + tableName + whereClause, params, Long.class);
-        List<Map<String, Object>> records = queryRecords("select * from " + tableName + whereClause + " order by row_id limit " + pageSize + " offset " + offset, params, columns);
+        String orderByClause = hasRowIdColumn(tableName) ? " order by row_id" : "";
+        List<Map<String, Object>> records = queryRecords("select * from " + tableName + whereClause + orderByClause + " limit " + pageSize + " offset " + offset, params, columns);
         return new PageResponse<>(pageNum, pageSize, total == null ? 0 : total, records);
     }
 
     public PageResponse<Map<String, Object>> filter(
-        String tableName,
-        List<DatasetService.MetaFieldRecord> columns,
-        List<QueryAnalysisService.FilterCondition> filters,
-        int pageNum,
-        int pageSize
+            String tableName,
+            List<DatasetService.MetaFieldRecord> columns,
+            List<QueryAnalysisService.FilterCondition> filters,
+            int pageNum,
+            int pageSize
     ) {
         return filter(tableName, columns, filters, "AND", null, "ASC", pageNum, pageSize);
     }
 
     public PageResponse<Map<String, Object>> filter(
-        String tableName,
-        List<DatasetService.MetaFieldRecord> columns,
-        List<QueryAnalysisService.FilterCondition> filters,
-        String logic,
-        String sortField,
-        String sortOrder,
-        int pageNum,
-        int pageSize
+            String tableName,
+            List<DatasetService.MetaFieldRecord> columns,
+            List<QueryAnalysisService.FilterCondition> filters,
+            String logic,
+            String sortField,
+            String sortOrder,
+            int pageNum,
+            int pageSize
     ) {
         StringBuilder where = new StringBuilder(" where 1=1 ");
         MapSqlParameterSource params = new MapSqlParameterSource();
@@ -152,12 +161,12 @@ public class DatasetTableService {
         int safePageNum = Math.max(pageNum, 1);
         int safePageSize = Math.max(1, Math.min(pageSize, 200));
         int offset = Math.max(safePageNum - 1, 0) * safePageSize;
-        String orderByClause = buildOrderByClause(columns, sortField, sortOrder);
+        String orderByClause = buildOrderByClause(tableName, columns, sortField, sortOrder);
         Long total = namedParameterJdbcTemplate.queryForObject("select count(*) from " + tableName + where, params, Long.class);
         List<Map<String, Object>> records = queryRecords(
-            "select * from " + tableName + where + orderByClause + " limit " + safePageSize + " offset " + offset,
-            params,
-            columns
+                "select * from " + tableName + where + orderByClause + " limit " + safePageSize + " offset " + offset,
+                params,
+                columns
         );
         return new PageResponse<>(safePageNum, safePageSize, total == null ? 0 : total, records);
     }
@@ -188,7 +197,17 @@ public class DatasetTableService {
     public List<Map<String, Object>> fetchAll(String tableName, List<DatasetService.MetaFieldRecord> columns, String field, String keyword) {
         MapSqlParameterSource params = new MapSqlParameterSource();
         String whereClause = keywordWhereClause(columns, field, keyword, params);
-        return queryRecords("select * from " + tableName + whereClause + " order by row_id", params, columns);
+        String orderByClause = hasRowIdColumn(tableName) ? " order by row_id" : "";
+        return queryRecords("select * from " + tableName + whereClause + orderByClause, params, columns);
+    }
+
+    private boolean hasRowIdColumn(String tableName) {
+        try {
+            jdbcTemplate.queryForObject("select row_id from " + tableName + " where 1 = 0", Object.class);
+            return true;
+        } catch (Exception exception) {
+            return false;
+        }
     }
 
     public void dropTable(String tableName) {
@@ -219,10 +238,10 @@ public class DatasetTableService {
     }
 
     private String keywordWhereClause(
-        List<DatasetService.MetaFieldRecord> columns,
-        String field,
-        String keyword,
-        MapSqlParameterSource params
+            List<DatasetService.MetaFieldRecord> columns,
+            String field,
+            String keyword,
+            MapSqlParameterSource params
     ) {
         if (keyword == null || keyword.isBlank()) {
             return "";
@@ -230,34 +249,37 @@ public class DatasetTableService {
         params.addValue("keyword", "%" + keyword.toLowerCase() + "%");
         if (field != null && !field.isBlank()) {
             DatasetService.MetaFieldRecord column = columns.stream()
-                .filter(meta -> meta.fieldName().equals(field) || meta.physicalColumnName().equals(field))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("筛选字段不存在: " + field));
+                    .filter(meta -> meta.fieldName().equals(field) || meta.physicalColumnName().equals(field))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("筛选字段不存在: " + field));
             return " where lower(concat('', " + column.physicalColumnName() + ")) like :keyword";
         }
         String orClause = columns.stream()
-            .map(column -> "lower(concat('', " + column.physicalColumnName() + ")) like :keyword")
-            .collect(Collectors.joining(" or "));
+                .map(column -> "lower(concat('', " + column.physicalColumnName() + ")) like :keyword")
+                .collect(Collectors.joining(" or "));
         return " where (" + orClause + ")";
     }
 
     private DatasetService.MetaFieldRecord resolveColumn(List<DatasetService.MetaFieldRecord> columns, String field) {
         return columns.stream()
-            .filter(meta -> meta.fieldName().equalsIgnoreCase(field) || meta.physicalColumnName().equalsIgnoreCase(field))
-            .findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("字段不存在: " + field));
+                .filter(meta -> meta.fieldName().equalsIgnoreCase(field) || meta.physicalColumnName().equalsIgnoreCase(field))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("字段不存在: " + field));
     }
 
-    private String buildOrderByClause(List<DatasetService.MetaFieldRecord> columns, String sortField, String sortOrder) {
+    private String buildOrderByClause(String tableName, List<DatasetService.MetaFieldRecord> columns, String sortField, String sortOrder) {
         String direction = "DESC".equalsIgnoreCase(sortOrder) ? "DESC" : "ASC";
+        boolean hasRowId = hasRowIdColumn(tableName);
         if (sortField == null || sortField.isBlank()) {
-            return " order by row_id " + direction;
+            return hasRowId ? " order by row_id " + direction : "";
         }
         DatasetService.MetaFieldRecord column = resolveColumn(columns, sortField);
         if ("row_id".equalsIgnoreCase(column.physicalColumnName())) {
-            return " order by row_id " + direction;
+            return hasRowId ? " order by row_id " + direction : "";
         }
-        return " order by " + column.physicalColumnName() + " " + direction + ", row_id asc";
+        return hasRowId
+                ? " order by " + column.physicalColumnName() + " " + direction + ", row_id asc"
+                : " order by " + column.physicalColumnName() + " " + direction;
     }
 
     private void validateTimeRangeValue(String value) {
