@@ -57,7 +57,7 @@ public class DashboardService {
             Map<String, String> tradeFields = loadFieldMap(tradeDataset.datasetId());
             String timeColumn = resolveColumn(tradeFields, List.of("order_time", "order_date", "created_at", "create_time", "pay_time"));
             String amountColumn = resolveColumn(tradeFields, List.of("amount", "total_amount", "payment_amount", "order_amount", "paid_amount"));
-            String productColumn = resolveColumn(tradeFields, List.of("product_name", "sku_name", "product_id", "sku_id", "goods_name", "name"));
+            String productColumn = resolveColumn(tradeFields, List.of("product_name", "product_sku", "sku_name", "product_id", "sku_id", "goods_name", "name"));
             String quantityColumn = resolveColumn(tradeFields, List.of("quantity", "qty", "buy_count", "count"));
             if (timeColumn != null) {
                 List<Map<String, Object>> rows = queryColumns(tradeDataset.tableName(), Arrays.asList(timeColumn, amountColumn, productColumn, quantityColumn));
@@ -69,7 +69,7 @@ public class DashboardService {
 
         if (inventoryDataset != null) {
             Map<String, String> inventoryFields = loadFieldMap(inventoryDataset.datasetId());
-            String stockColumn = resolveColumn(inventoryFields, List.of("stock", "stock_qty", "inventory", "inventory_qty", "available_stock", "quantity"));
+            String stockColumn = resolveColumn(inventoryFields, List.of("stock", "stock_quantity", "stock_qty", "inventory", "inventory_qty", "available_stock", "quantity"));
             if (stockColumn != null) {
                 List<Map<String, Object>> rows = queryColumns(inventoryDataset.tableName(), List.of(stockColumn));
                 lowStockCount = rows.stream().map(row -> toDouble(row.get(stockColumn))).filter(value -> value <= 10D).count();
