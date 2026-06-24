@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { isAuthExpiredError } from '../api/client';
 import {
@@ -28,6 +28,12 @@ const form = reactive({
   duplicateConnectionStrategy: 'WARN' as 'ALLOW' | 'WARN' | 'REJECT'
 });
 const canManageSources = computed(() => authStore.hasAction('source.manage'));
+
+watch(() => form.sourceType, (type) => {
+  if (type === 'FILE') {
+    Object.assign(form, { host: '', port: undefined, dbName: '', username: '', password: '' });
+  }
+});
 
 function resetForm() {
   editingSourceId.value = null;
@@ -180,21 +186,23 @@ onMounted(async () => {
             <el-option label="ALLOW（允许保存且不提示）" value="ALLOW" />
           </el-select>
         </el-form-item>
-        <el-form-item label="主机地址">
-          <el-input v-model="form.host" />
-        </el-form-item>
-        <el-form-item label="端口">
-          <el-input-number v-model="form.port" :min="1" :max="65535" class="full-width" />
-        </el-form-item>
-        <el-form-item label="数据库名">
-          <el-input v-model="form.dbName" />
-        </el-form-item>
-        <el-form-item label="用户名">
-          <el-input v-model="form.username" />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input v-model="form.password" show-password :placeholder="editingSourceId ? '留空则保留原密码' : ''" />
-        </el-form-item>
+        <template v-if="form.sourceType === 'MYSQL'">
+          <el-form-item label="主机地址">
+            <el-input v-model="form.host" placeholder="127.0.0.1" />
+          </el-form-item>
+          <el-form-item label="端口">
+            <el-input-number v-model="form.port" :min="1" :max="65535" class="full-width" />
+          </el-form-item>
+          <el-form-item label="数据库名">
+            <el-input v-model="form.dbName" />
+          </el-form-item>
+          <el-form-item label="用户名">
+            <el-input v-model="form.username" />
+          </el-form-item>
+          <el-form-item label="密码">
+            <el-input v-model="form.password" show-password :placeholder="editingSourceId ? '留空则保留原密码' : ''" />
+          </el-form-item>
+        </template>
         <el-form-item label="说明">
           <el-input v-model="form.description" type="textarea" :rows="3" />
         </el-form-item>
