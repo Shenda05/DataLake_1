@@ -12,11 +12,13 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -145,6 +147,7 @@ public class GovernanceService {
         validateOperatorChain(operatorChain);
         DatasetService.DatasetDetail inputDataset = datasetService.detail(datasetId);
         List<DatasetService.MetaFieldRecord> metadata = cloneColumns(datasetService.metadata(datasetId));
+        validateOperatorFields(metadata, operatorChain);
         List<Map<String, Object>> rows = deepCopy(datasetTableService.fetchAll(inputDataset.physicalTableName(), metadata, null, null));
 
         List<Map<String, Object>> currentRows = rows;
@@ -318,6 +321,48 @@ public class GovernanceService {
             case "FILTER_KEEP" -> filterKeep(rows, requireField(step), param(step.params(), "operator", "LIKE"), param(step.params(), "value", param(step.params(), "keyword", "")));
             default -> throw new IllegalArgumentException("不支持的治理算子: " + step.operatorKey());
         };
+    }
+
+    private void validateOperatorFields(List<DatasetService.MetaFieldRecord> metadata, List<OperatorStep> operatorChain) {
+        Set<String> fieldNames = metadata.stream()
+            .map(DatasetService.MetaFieldRecord::fieldName)
+            .collect(Collectors.toCollection(HashSet::new));
+        for (OperatorStep step : operatorChain) {
+            List<String> requiredFields = requiredFields(step, metadata);
+            for (String field : requiredFields) {
+                if (!fieldNames.contains(field)) {
+                    throw new IllegalArgumentException(
+                        "算子 " + step.operatorKey() + " 使用的字段不存在: " + field + "，请从输入数据集元数据中选择字段"
+                    );
+                }
+            }
+        }
+    }
+
+    private List<String> requiredFields(OperatorStep step, List<DatasetService.MetaFieldRecord> metadata) {
+        String operatorKey = normalizeOperatorKey(step.operatorKey());
+        return switch (operatorKey) {
+            case "NULL_FILL", "FIELD_CONVERT", "AMOUNT_NORMALIZE", "TIME_NORMALIZE",
+                 "CATEGORY_NORMALIZE", "STATUS_NORMALIZE", "FILTER_KEEP" -> List.of(requireField(step));
+            case "DEDUPLICATE" -> parseFields(step.params());
+            case "ORDER_DEDUP" -> {
+                List<String> fields = parseFields(step.params());
+                yield fields.isEmpty() ? defaultOrderDedupFields(metadata) : fields;
+            }
+            default -> List.of();
+        };
+    }
+
+    private List<String> defaultOrderDedupFields(List<DatasetService.MetaFieldRecord> metadata) {
+        Set<String> fieldNames = metadata.stream()
+            .map(DatasetService.MetaFieldRecord::fieldName)
+            .collect(Collectors.toCollection(HashSet::new));
+        for (String candidate : List.of("order_id", "order_no", "id")) {
+            if (fieldNames.contains(candidate)) {
+                return List.of(candidate);
+            }
+        }
+        return List.of();
     }
 
     private StepApplyResult nullFill(List<Map<String, Object>> rows, String field, String fillValue) {
@@ -683,7 +728,7 @@ public class GovernanceService {
     }
 
     private String buildOutputDatasetName(String inputDatasetName, String executionName) {
-        String suffix = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String suffix = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS"));
         String base = executionName == null || executionName.isBlank() ? inputDatasetName + "_治理结果" : executionName;
         return base + "_" + suffix;
     }

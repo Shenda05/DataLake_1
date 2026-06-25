@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { isAuthExpiredError } from '../api/client';
 import {
@@ -29,6 +30,7 @@ const executionFailure = ref('');
 const loading = ref(false);
 const editingFlowId = ref<number | null>(null);
 const includeDisabledOperators = ref(true);
+const router = useRouter();
 const form = reactive({
   datasetId: undefined as number | undefined,
   flowName: '',
@@ -37,7 +39,8 @@ const form = reactive({
 const steps = ref<EditableStep[]>([
   { operatorKey: 'ORDER_DEDUP', paramsText: '{\n  "field": "order_id"\n}' },
   { operatorKey: 'AMOUNT_NORMALIZE', paramsText: '{\n  "field": "amount"\n}' },
-  { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' }
+  { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' },
+  { operatorKey: 'STATUS_NORMALIZE', paramsText: '{\n  "field": "order_status"\n}' }
 ]);
 // [Ecom-MVP Completed] 电商治理流程模板，复用通用治理引擎
 const ecommerceFlowTemplates = [
@@ -138,7 +141,8 @@ function resetForm() {
   steps.value = [
     { operatorKey: 'ORDER_DEDUP', paramsText: '{\n  "field": "order_id"\n}' },
     { operatorKey: 'AMOUNT_NORMALIZE', paramsText: '{\n  "field": "amount"\n}' },
-    { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' }
+    { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' },
+    { operatorKey: 'STATUS_NORMALIZE', paramsText: '{\n  "field": "order_status"\n}' }
   ];
 }
 
@@ -258,6 +262,16 @@ async function executeFlow() {
   } finally {
     loading.value = false;
   }
+}
+
+function viewOutputDataset() {
+  if (!executionResult.value) {
+    return;
+  }
+  void router.push({
+    name: 'datasets',
+    query: { datasetId: String(executionResult.value.outputDatasetId) }
+  });
 }
 
 onMounted(async () => {
@@ -431,6 +445,9 @@ onMounted(async () => {
           type="success"
           :closable="false"
         />
+        <div v-if="executionResult" class="action-row">
+          <el-button type="primary" plain @click="viewOutputDataset">查看输出数据集</el-button>
+        </div>
         <el-alert
           v-if="executionFailure"
           class="notice-box"

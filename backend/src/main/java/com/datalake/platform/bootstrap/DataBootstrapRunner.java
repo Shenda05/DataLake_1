@@ -1,7 +1,12 @@
 package com.datalake.platform.bootstrap;
 
 import com.datalake.platform.auth.RoleMenuCatalog;
+import com.datalake.platform.dataset.DatasetService;
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.dao.DataAccessException;
@@ -12,12 +17,17 @@ import org.springframework.stereotype.Component;
 @Component
 public class DataBootstrapRunner implements ApplicationRunner {
 
+    private static final String GOVERNANCE_DEMO_DATASET_NAME = "治理演示_订单脏数据";
+    private static final String GOVERNANCE_DEMO_FLOW_NAME = "治理演示_订单自动治理流程";
+
     private final JdbcTemplate jdbcTemplate;
     private final PasswordEncoder passwordEncoder;
+    private final DatasetService datasetService;
 
-    public DataBootstrapRunner(JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder) {
+    public DataBootstrapRunner(JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder, DatasetService datasetService) {
         this.jdbcTemplate = jdbcTemplate;
         this.passwordEncoder = passwordEncoder;
+        this.datasetService = datasetService;
     }
 
     @Override
@@ -30,6 +40,7 @@ public class DataBootstrapRunner implements ApplicationRunner {
         bootstrapRoles();
         bootstrapUsers();
         bootstrapOperators();
+        bootstrapGovernanceDemoDataset();
     }
 
     private void ensureRoleMenuPermissionsColumn() {
@@ -195,6 +206,141 @@ public class DataBootstrapRunner implements ApplicationRunner {
             "ENABLED",
             now()
         );
+    }
+
+    private void bootstrapGovernanceDemoDataset() {
+        Long datasetId = findDatasetId(GOVERNANCE_DEMO_DATASET_NAME);
+        if (datasetId == null) {
+            Long adminUserId = adminUserId();
+            DatasetService.CreatedDataset dataset = datasetService.createDatasetFromRows(
+                null,
+                GOVERNANCE_DEMO_DATASET_NAME,
+                "TRADE",
+                "SQL",
+                "bootstrap://governance-demo-orders",
+                "启动时自动生成的治理演示数据：重复订单、金额格式不统一、时间格式不统一、状态值不统一",
+                adminUserId,
+                governanceDemoColumns(),
+                governanceDemoRows()
+            );
+            datasetId = dataset.datasetId();
+        }
+        ensureGovernanceDemoFlow(datasetId);
+    }
+
+    private Long findDatasetId(String datasetName) {
+        return jdbcTemplate.query(
+            "select dataset_id from data_set where dataset_name = ?",
+            rs -> rs.next() ? rs.getLong("dataset_id") : null,
+            datasetName
+        );
+    }
+
+    private Long adminUserId() {
+        Long userId = jdbcTemplate.query(
+            "select user_id from sys_user where username = 'admin'",
+            rs -> rs.next() ? rs.getLong("user_id") : null
+        );
+        return userId == null ? 1L : userId;
+    }
+
+    private List<DatasetService.MetaFieldRecord> governanceDemoColumns() {
+        return List.of(
+            new DatasetService.MetaFieldRecord(null, null, "order_id", "order_id", "VARCHAR", false, "ORD-1001", 1),
+            new DatasetService.MetaFieldRecord(null, null, "amount", "amount", "VARCHAR", true, "￥1,299.90", 2),
+            new DatasetService.MetaFieldRecord(null, null, "order_time", "order_time", "VARCHAR", true, "2026/06/20 09:15:00", 3),
+            new DatasetService.MetaFieldRecord(null, null, "order_status", "order_status", "VARCHAR", true, "paid", 4),
+            new DatasetService.MetaFieldRecord(null, null, "product_name", "product_name", "VARCHAR", true, "无线耳机", 5),
+            new DatasetService.MetaFieldRecord(null, null, "category", "category", "VARCHAR", true, "手机配件", 6),
+            new DatasetService.MetaFieldRecord(null, null, "buyer_city", "buyer_city", "VARCHAR", true, "上海", 7)
+        );
+    }
+
+    private List<Map<String, Object>> governanceDemoRows() {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        rows.add(order("ORD-1001", "￥1,299.90", "2026/06/20 09:15:00", "paid", "无线耳机 Pro", "手机配件", "上海"));
+        rows.add(order("ORD-1001", "1299.9", "2026-06-20 09:15", "支付成功", "无线耳机 Pro", "手机配件", "上海"));
+        rows.add(order("ORD-1002", " 88元 ", "2026-06-21 10:30:00", "pending", "运动T恤", "服装", "杭州"));
+        rows.add(order("ORD-1003", "$45.678", "2026/06/22 11:00", "cancelled", "进口饼干", "食品", "广州"));
+        rows.add(order("ORD-1004", "", "2026-06-23", "failed", "电饭煲", "家电", "深圳"));
+        rows.add(order("ORD-1005", "1,999", "2026/06/23 20:18:30", "completed", "智能手机 X", "手机数码", "北京"));
+        rows.add(order("ORD-1006", "￥599.5", "2026-06-24 08:05", "created", "蓝牙音箱", "3C", "成都"));
+        rows.add(order("ORD-1007", "299 RMB", "2026/06/24 09:20", "已支付", "跑步鞋", "服装鞋包", "武汉"));
+        rows.add(order("ORD-1007", "299.00", "2026-06-24 09:20:00", "success", "跑步鞋", "服装鞋包", "武汉"));
+        rows.add(order("ORD-1008", "76.8元", "2026-06-24 12:00:00", "refunded", "坚果礼盒", "食品生鲜", "南京"));
+        rows.add(order("ORD-1009", "￥3499.00", "2026/06/24 14:30:00", "PAID", "扫地机器人", "家用电器", "苏州"));
+        rows.add(order("ORD-1010", "abc", "2026-06-24 16:45", "pending", "儿童玩具", "母婴玩具", "宁波"));
+        rows.add(order("ORD-1011", "0", "2026/06/25 09:00:00", "closed", "售后补偿券", "虚拟商品", "上海"));
+        rows.add(order("ORD-1012", "￥109.456", "2026-06-25 09:12:35", "待支付", "厨房刀具", "家电厨具", "厦门"));
+        rows.add(order("ORD-1013", "$18.2", "2026/06/25 10:18", "canceled", "咖啡豆", "food", "青岛"));
+        rows.add(order("ORD-1014", "666.666", "2026-06-25 11:11:11", "支付成功", "平板电脑", "phone", "重庆"));
+        rows.add(order("ORD-1015", "  35  ", "2026/06/25 12:00:00", "new", "数据线", "手机配件", "天津"));
+        rows.add(order("ORD-1016", "￥249.9", "2026-06-25 13:05", "失败", "行李箱", "旅行用品", "西安"));
+        rows.add(order("ORD-1017", "899元", "2026/06/25 14:40", "paid", "空气炸锅", "appliance", "合肥"));
+        rows.add(order("ORD-1018", "￥59.90", "2026-06-25 15:45:00", "已退款", "洗衣液", "日用百货", "长沙"));
+        rows.add(order("ORD-1018", "59.9", "2026/06/25 15:45", "refunded", "洗衣液", "日用百货", "长沙"));
+        rows.add(order("ORD-1019", "420.00", "2026-06-25 16:00:00", "paid", "衬衫", "clothes", "郑州"));
+        rows.add(order("ORD-1020", "￥15.5", "2026/06/25 17:30:00", "pending", "矿泉水", "食品", "济南"));
+        rows.add(order("ORD-1020", "15.50", "2026-06-25 17:30", "created", "矿泉水", "食品", "济南"));
+        return rows;
+    }
+
+    private Map<String, Object> order(
+        String orderId,
+        String amount,
+        String orderTime,
+        String orderStatus,
+        String productName,
+        String category,
+        String buyerCity
+    ) {
+        LinkedHashMap<String, Object> row = new LinkedHashMap<>();
+        row.put("order_id", orderId);
+        row.put("amount", amount);
+        row.put("order_time", orderTime);
+        row.put("order_status", orderStatus);
+        row.put("product_name", productName);
+        row.put("category", category);
+        row.put("buyer_city", buyerCity);
+        return row;
+    }
+
+    private void ensureGovernanceDemoFlow(Long datasetId) {
+        Integer count = jdbcTemplate.queryForObject(
+            "select count(*) from governance_flow where flow_name = ?",
+            Integer.class,
+            GOVERNANCE_DEMO_FLOW_NAME
+        );
+        if (count != null && count > 0) {
+            jdbcTemplate.update(
+                "update governance_flow set input_dataset_id = ?, operator_chain = ?, update_time = ? where flow_name = ?",
+                datasetId,
+                governanceDemoOperatorChain(),
+                now(),
+                GOVERNANCE_DEMO_FLOW_NAME
+            );
+            return;
+        }
+        jdbcTemplate.update(
+            "insert into governance_flow(flow_name,input_dataset_id,operator_chain,creator,create_time,update_time) values(?,?,?,?,?,?)",
+            GOVERNANCE_DEMO_FLOW_NAME,
+            datasetId,
+            governanceDemoOperatorChain(),
+            adminUserId(),
+            now(),
+            now()
+        );
+    }
+
+    private String governanceDemoOperatorChain() {
+        return """
+            [
+              {"operatorKey":"ORDER_DEDUP","params":{"field":"order_id"}},
+              {"operatorKey":"AMOUNT_NORMALIZE","params":{"field":"amount"}},
+              {"operatorKey":"TIME_NORMALIZE","params":{"field":"order_time"}},
+              {"operatorKey":"STATUS_NORMALIZE","params":{"field":"order_status"}}
+            ]
+            """;
     }
 
     private Timestamp now() {
