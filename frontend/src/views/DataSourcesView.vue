@@ -63,6 +63,10 @@ async function submit() {
     ElMessage.warning('请填写数据源名称和类型');
     return;
   }
+  if (form.sourceType === 'MYSQL' && (!form.host || !form.dbName || !form.username)) {
+    ElMessage.warning('MYSQL 类型请填写主机地址、数据库名和用户名');
+    return;
+  }
   try {
     const isEditing = Boolean(editingSourceId.value);
     const result = editingSourceId.value
@@ -111,7 +115,7 @@ async function handleTest(sourceId: number) {
     const result = await testDataSource(sourceId);
     ElMessage.success(result.message);
   } catch (error) {
-    ElMessage.error(`测试失败: ${(error as Error).message}`);
+    ElMessage.error((error as Error).message);
   }
 }
 

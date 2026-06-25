@@ -145,7 +145,7 @@ public class DataSourceService {
             String productName = connection.getMetaData().getDatabaseProductName();
             return new ConnectionTestResult(record.sourceId(), true, "连接测试成功，数据库类型: " + productName);
         } catch (Exception exception) {
-            throw new IllegalArgumentException("连接测试失败: " + exception.getMessage(), exception);
+            throw new IllegalArgumentException("连接测试失败：请检查主机地址、端口及账号密码是否正确", exception);
         }
     }
 
