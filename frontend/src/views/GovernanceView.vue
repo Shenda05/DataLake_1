@@ -1,50 +1,483 @@
 <script setup lang="ts">
-import { governanceOperators } from '../mock/api';
+import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { isAuthExpiredError } from '../api/client';
+import {
+  createGovernanceFlow,
+  executeGovernanceFlow,
+  listDatasets,
+  listGovernanceFlows,
+  listGovernanceOperators,
+  updateGovernanceOperatorStatus,
+  type DatasetSummary,
+  type GovernanceExecutionResult,
+  type GovernanceFlow,
+  type GovernanceOperator
+} from '../api/platform';
+import { useAuthStore } from '../stores/auth';
 
-const flowChain = [
-  { step: 1, name: '空值填充', params: 'industry -> UNKNOWN' },
-  { step: 2, name: '重复数据清理', params: 'company_name + patent_code' }
+type EditableStep = {
+  operatorKey: string;
+  paramsText: string;
+};
+
+const datasets = ref<DatasetSummary[]>([]);
+const operators = ref<GovernanceOperator[]>([]);
+const flows = ref<GovernanceFlow[]>([]);
+const executionResult = ref<GovernanceExecutionResult | null>(null);
+const executionFailure = ref('');
+const loading = ref(false);
+const editingFlowId = ref<number | null>(null);
+const includeDisabledOperators = ref(true);
+const router = useRouter();
+const form = reactive({
+  datasetId: undefined as number | undefined,
+  flowName: '',
+  executionName: ''
+});
+const steps = ref<EditableStep[]>([
+  { operatorKey: 'ORDER_DEDUP', paramsText: '{\n  "field": "order_id"\n}' },
+  { operatorKey: 'AMOUNT_NORMALIZE', paramsText: '{\n  "field": "amount"\n}' },
+  { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' },
+  { operatorKey: 'STATUS_NORMALIZE', paramsText: '{\n  "field": "order_status"\n}' }
+]);
+// [Ecom-MVP Completed] 电商治理流程模板，复用通用治理引擎
+const ecommerceFlowTemplates = [
+  {
+    key: 'ORDER',
+    label: '订单自动治理',
+    flowName: '订单自动治理流程',
+    steps: [
+      { operatorKey: 'ORDER_DEDUP', paramsText: '{\n  "field": "order_id"\n}' },
+      { operatorKey: 'AMOUNT_NORMALIZE', paramsText: '{\n  "field": "amount"\n}' },
+      { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' },
+      { operatorKey: 'STATUS_NORMALIZE', paramsText: '{\n  "field": "order_status"\n}' }
+    ]
+  },
+  {
+    key: 'PRODUCT',
+    label: '商品分类治理',
+    flowName: '商品分类标准化流程',
+    steps: [
+      { operatorKey: 'CATEGORY_NORMALIZE', paramsText: '{\n  "field": "category"\n}' },
+      { operatorKey: 'STATUS_NORMALIZE', paramsText: '{\n  "field": "status"\n}' }
+    ]
+  }
 ];
+const authStore = useAuthStore();
+const canManageGovernance = computed(() => authStore.hasAction('governance.manage'));
+const canExecuteGovernance = computed(() => authStore.hasAction('governance.execute'));
+const canEditWorkflow = computed(() => canManageGovernance.value || canExecuteGovernance.value);
+const governancePermissionHint = computed(() => {
+  if (canManageGovernance.value && canExecuteGovernance.value) {
+    return '';
+  }
+  if (canExecuteGovernance.value) {
+    return '当前角色可临时编排算子并执行治理，但不能保存治理流程。';
+  }
+  if (canManageGovernance.value) {
+    return '当前角色可保存治理流程，但不能直接执行治理。';
+  }
+  return '当前角色只有治理查看权限，不能编排、保存或执行治理流程。';
+});
+
+const selectedDatasetName = computed(() => datasets.value.find((item) => item.datasetId === form.datasetId)?.datasetName || '未选择');
+
+async function loadData() {
+  datasets.value = await listDatasets();
+  operators.value = await listGovernanceOperators({ includeDisabled: includeDisabledOperators.value });
+  flows.value = await listGovernanceFlows();
+  if (!form.datasetId && datasets.value.length > 0) {
+    form.datasetId = datasets.value[0].datasetId;
+  }
+}
+
+function addStep() {
+  if (!canEditWorkflow.value) {
+    ElMessage.warning('当前角色没有治理操作权限');
+    return;
+  }
+  steps.value.push({
+    operatorKey: operators.value[0]?.operatorKey || 'NULL_FILL',
+    paramsText: '{\n  "field": ""\n}'
+  });
+}
+
+function removeStep(index: number) {
+  if (!canEditWorkflow.value) {
+    ElMessage.warning('当前角色没有治理操作权限');
+    return;
+  }
+  if (steps.value.length === 1) {
+    ElMessage.warning('至少保留一个治理步骤');
+    return;
+  }
+  steps.value.splice(index, 1);
+}
+
+function moveStepUp(index: number) {
+  if (!canEditWorkflow.value || index <= 0) {
+    return;
+  }
+  const previous = steps.value[index - 1];
+  steps.value[index - 1] = steps.value[index];
+  steps.value[index] = previous;
+}
+
+function moveStepDown(index: number) {
+  if (!canEditWorkflow.value || index >= steps.value.length - 1) {
+    return;
+  }
+  const next = steps.value[index + 1];
+  steps.value[index + 1] = steps.value[index];
+  steps.value[index] = next;
+}
+
+function resetForm() {
+  editingFlowId.value = null;
+  form.flowName = '';
+  form.executionName = '';
+  steps.value = [
+    { operatorKey: 'ORDER_DEDUP', paramsText: '{\n  "field": "order_id"\n}' },
+    { operatorKey: 'AMOUNT_NORMALIZE', paramsText: '{\n  "field": "amount"\n}' },
+    { operatorKey: 'TIME_NORMALIZE', paramsText: '{\n  "field": "order_time"\n}' },
+    { operatorKey: 'STATUS_NORMALIZE', paramsText: '{\n  "field": "order_status"\n}' }
+  ];
+}
+
+function loadFlow(flow: GovernanceFlow) {
+  editingFlowId.value = flow.flowId;
+  form.datasetId = flow.inputDatasetId;
+  form.flowName = flow.flowName;
+  form.executionName = flow.flowName;
+  steps.value = flow.operatorChain.map((step) => ({
+    operatorKey: step.operatorKey,
+    paramsText: JSON.stringify(step.params || {}, null, 2)
+  }));
+}
+
+function applyEcommerceTemplate(templateKey: string) {
+  const template = ecommerceFlowTemplates.find((item) => item.key === templateKey);
+  if (!template) {
+    return;
+  }
+  form.flowName = template.flowName;
+  form.executionName = template.flowName;
+  steps.value = template.steps.map((step) => ({ ...step }));
+  ElMessage.success(`已套用模板：${template.label}`);
+}
+
+function flowRowClassName({ row }: { row: GovernanceFlow }) {
+  return row.flowId === editingFlowId.value ? 'current-row-highlight' : '';
+}
+
+async function toggleOperatorStatus(operator: GovernanceOperator) {
+  if (!canManageGovernance.value) {
+    ElMessage.warning('当前角色没有治理流程保存权限');
+    return;
+  }
+  const nextStatus = operator.status === 'ENABLED' ? 'DISABLED' : 'ENABLED';
+  const actionText = nextStatus === 'ENABLED' ? '启用' : '停用';
+  try {
+    await ElMessageBox.confirm(`确认${actionText}算子 ${operator.operatorName}（${operator.operatorKey}）吗？`, `${actionText}治理算子`, {
+      type: 'warning',
+      confirmButtonText: '确认',
+      cancelButtonText: '取消'
+    });
+    await updateGovernanceOperatorStatus(operator.operatorKey, nextStatus);
+    await loadData();
+    ElMessage.success(`算子已${actionText}`);
+  } catch (error) {
+    if (error === 'cancel') {
+      return;
+    }
+    ElMessage.error(`更新算子状态失败: ${(error as Error).message}`);
+  }
+}
+
+function buildOperatorChain() {
+  return steps.value.map((step, index) => {
+    try {
+      return {
+        operatorKey: step.operatorKey,
+        params: step.paramsText.trim() ? (JSON.parse(step.paramsText) as Record<string, unknown>) : {}
+      };
+    } catch (error) {
+      throw new Error(`第 ${index + 1} 步参数 JSON 无法解析`);
+    }
+  });
+}
+
+async function saveFlow() {
+  if (!canManageGovernance.value) {
+    ElMessage.warning('当前角色没有治理流程保存权限');
+    return;
+  }
+  if (!form.datasetId || !form.flowName) {
+    ElMessage.warning('请先选择输入数据集并填写流程名称');
+    return;
+  }
+  loading.value = true;
+  try {
+    const operatorChain = buildOperatorChain();
+    const result = await createGovernanceFlow({
+      flowName: form.flowName,
+      datasetId: form.datasetId,
+      operatorChain
+    });
+    ElMessage.success(`治理流程已保存：${result.flowName}`);
+    await loadData();
+  } catch (error) {
+    ElMessage.error(`保存流程失败: ${(error as Error).message}`);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function executeFlow() {
+  if (!canExecuteGovernance.value) {
+    ElMessage.warning('当前角色没有治理执行权限');
+    return;
+  }
+  if (!form.datasetId) {
+    ElMessage.warning('请先选择输入数据集');
+    return;
+  }
+  loading.value = true;
+  try {
+    const result = await executeGovernanceFlow({
+      datasetId: form.datasetId,
+      operatorChain: buildOperatorChain(),
+      executionName: form.executionName || form.flowName || undefined
+    });
+    executionResult.value = result;
+    executionFailure.value = '';
+    ElMessage.success(`治理完成，输出数据集 ${result.outputDatasetName}`);
+    await loadData();
+  } catch (error) {
+    executionResult.value = null;
+    executionFailure.value = (error as Error).message;
+    ElMessage.error(`执行治理失败: ${(error as Error).message}`);
+  } finally {
+    loading.value = false;
+  }
+}
+
+function viewOutputDataset() {
+  if (!executionResult.value) {
+    return;
+  }
+  void router.push({
+    name: 'datasets',
+    query: { datasetId: String(executionResult.value.outputDatasetId) }
+  });
+}
+
+onMounted(async () => {
+  try {
+    await loadData();
+  } catch (error) {
+    if (isAuthExpiredError(error)) {
+      return;
+    }
+    ElMessage.error(`治理页初始化失败: ${(error as Error).message}`);
+  }
+});
 </script>
 
 <template>
-  <div class="page-grid two-column-grid">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <span>可用算子</span>
-          <el-tag type="success">Week 6</el-tag>
+  <div class="page-grid">
+    <section class="two-column-grid">
+      <el-card shadow="never">
+        <template #header>
+          <div class="card-header">
+            <span>电商治理算子（兼容通用）</span>
+            <div class="card-header-actions">
+              <el-switch
+                v-model="includeDisabledOperators"
+                inline-prompt
+                active-text="全部"
+                inactive-text="启用"
+                @change="loadData"
+              />
+              <el-tag type="success">Real API</el-tag>
+            </div>
+          </div>
+        </template>
+        <el-table :data="operators" stripe>
+          <el-table-column prop="operatorName" label="算子名称" />
+          <el-table-column prop="operatorType" label="类型" width="120" />
+          <el-table-column prop="operatorKey" label="标识" width="180" />
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }">
+              <el-tag :type="row.status === 'ENABLED' ? 'success' : 'info'">{{ row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="description" label="说明" />
+          <el-table-column label="操作" width="120">
+            <template #default="{ row }">
+              <el-button
+                v-if="canManageGovernance"
+                link
+                :type="row.status === 'ENABLED' ? 'danger' : 'primary'"
+                @click="toggleOperatorStatus(row)"
+              >
+                {{ row.status === 'ENABLED' ? '停用' : '启用' }}
+              </el-button>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+
+      <el-card shadow="never">
+        <template #header>
+          <div class="card-header">
+            <span>{{ editingFlowId ? '编辑电商治理流程' : '电商治理流程编排' }}</span>
+            <div>
+              <el-button link type="primary" @click="resetForm">重置</el-button>
+              <el-button type="primary" :loading="loading" :disabled="!canExecuteGovernance" @click="executeFlow">执行流程</el-button>
+            </div>
+          </div>
+        </template>
+        <div class="card-header-actions">
+          <span class="inline-tip">快捷模板：</span>
+          <el-button
+            v-for="template in ecommerceFlowTemplates"
+            :key="template.key"
+            size="small"
+            :disabled="!canEditWorkflow"
+            @click="applyEcommerceTemplate(template.key)"
+          >
+            {{ template.label }}
+          </el-button>
         </div>
-      </template>
-      <el-table :data="governanceOperators" stripe>
-        <el-table-column prop="operatorName" label="算子名称" />
-        <el-table-column prop="operatorType" label="类型" />
-        <el-table-column prop="operatorKey" label="标识" />
-      </el-table>
-    </el-card>
+        <el-alert
+          v-if="governancePermissionHint"
+          class="notice-box"
+          :title="governancePermissionHint"
+          type="warning"
+          :closable="false"
+        />
+          <el-form label-position="top">
+            <el-form-item label="输入数据集">
+            <el-select v-model="form.datasetId" class="form-select-xl" placeholder="请选择数据集" :disabled="!canEditWorkflow">
+              <el-option
+                v-for="dataset in datasets"
+                :key="dataset.datasetId"
+                :label="`${dataset.datasetName} (${dataset.businessDomain})`"
+                :value="dataset.datasetId"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="流程名称">
+            <el-input v-model="form.flowName" placeholder="例如 订单自动治理流程" :disabled="!canManageGovernance" />
+          </el-form-item>
+          <el-form-item label="执行名称">
+            <el-input v-model="form.executionName" placeholder="留空则自动生成输出数据集名称" :disabled="!canExecuteGovernance" />
+          </el-form-item>
+        </el-form>
+
+        <div class="page-grid">
+          <el-card
+            v-for="(step, index) in steps"
+            :key="index"
+            shadow="hover"
+            class="embedded-card"
+          >
+            <template #header>
+              <div class="card-header">
+                <span>步骤 {{ index + 1 }}</span>
+                <div class="card-header-actions">
+                  <el-button link :disabled="!canEditWorkflow || index === 0" @click="moveStepUp(index)">上移</el-button>
+                  <el-button link :disabled="!canEditWorkflow || index === steps.length - 1" @click="moveStepDown(index)">下移</el-button>
+                  <el-button link type="danger" :disabled="!canEditWorkflow" @click="removeStep(index)">删除</el-button>
+                </div>
+              </div>
+            </template>
+            <el-form label-position="top">
+            <el-form-item label="算子">
+                <el-select v-model="step.operatorKey" class="form-select-wide" :disabled="!canEditWorkflow">
+                  <el-option
+                    v-for="operator in operators"
+                    :key="operator.operatorKey"
+                    :label="operator.operatorName"
+                    :value="operator.operatorKey"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="参数 JSON">
+                <el-input v-model="step.paramsText" type="textarea" :rows="5" :disabled="!canEditWorkflow" />
+              </el-form-item>
+            </el-form>
+          </el-card>
+        </div>
+
+        <div class="action-row">
+          <el-button plain :disabled="!canEditWorkflow" @click="addStep">新增步骤</el-button>
+          <el-button type="success" plain :loading="loading" :disabled="!canManageGovernance" @click="saveFlow">保存流程</el-button>
+        </div>
+
+        <el-alert
+          class="notice-box"
+          :title="`当前输入数据集：${selectedDatasetName}`"
+          type="info"
+          :closable="false"
+        />
+        <el-alert
+          class="notice-box"
+          title="已支持订单去重、金额标准化、时间标准化、商品分类标准化、状态标准化算子。"
+          type="success"
+          :closable="false"
+        />
+        <el-alert
+          class="notice-box"
+          title="当前仍使用 JSON 编辑算子参数；字段映射向导和可视化参数配置尚未实现。"
+          type="warning"
+          :closable="false"
+        />
+        <el-alert
+          v-if="executionResult"
+          class="notice-box"
+          :title="executionResult.summary"
+          :description="`输出数据集：${executionResult.outputDatasetName}，治理前记录数：${executionResult.inputRecordCount}，治理后记录数：${executionResult.outputRecordCount}，异常处理条数：${executionResult.abnormalHandledCount}，日志编号：${executionResult.logRef}`"
+          type="success"
+          :closable="false"
+        />
+        <div v-if="executionResult" class="action-row">
+          <el-button type="primary" plain @click="viewOutputDataset">查看输出数据集</el-button>
+        </div>
+        <el-alert
+          v-if="executionFailure"
+          class="notice-box"
+          title="治理执行失败"
+          :description="executionFailure"
+          type="error"
+          :closable="false"
+        />
+      </el-card>
+    </section>
 
     <el-card shadow="never">
       <template #header>
         <div class="card-header">
-          <span>治理流程</span>
-          <el-button type="primary">执行流程</el-button>
+          <span>已保存电商治理流程</span>
+          <el-button link type="primary" @click="loadData">刷新</el-button>
         </div>
       </template>
-      <el-steps direction="vertical" :active="flowChain.length">
-        <el-step
-          v-for="step in flowChain"
-          :key="step.step"
-          :title="`${step.step}. ${step.name}`"
-          :description="step.params"
-        />
-      </el-steps>
-      <el-alert
-        class="notice-box"
-        title="流程输出固定保存为新数据集，避免覆盖原始数据"
-        type="info"
-        :closable="false"
-      />
+      <el-table :data="flows" stripe :row-class-name="flowRowClassName" @row-click="loadFlow">
+        <el-table-column prop="flowName" label="流程名称" />
+        <el-table-column prop="inputDatasetName" label="输入数据集" />
+        <el-table-column prop="outputDatasetName" label="最近输出数据集" />
+        <el-table-column label="步骤数" width="100">
+          <template #default="{ row }">
+            {{ row.operatorChain.length }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="creatorName" label="创建人" width="120" />
+        <el-table-column prop="updateTime" label="更新时间" width="180" />
+      </el-table>
     </el-card>
   </div>
 </template>
-

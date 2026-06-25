@@ -30,17 +30,17 @@ async function submit() {
   <div class="login-page">
     <div class="login-panel">
       <div>
-        <p class="hero-kicker">Week 1-2 MVP</p>
-        <h1>数据湖管理平台</h1>
+        <p class="hero-kicker">E-commerce MVP</p>
+        <h1>电商数据湖管理平台</h1>
         <p class="hero-text">
-          从数据接入、元数据管理到治理、调度与日志监控，先把课程项目最关键的闭环跑通。
+          聚焦订单、商品、库存主链路，从数据接入到分析、治理、调度与日志追踪一体化贯通。
         </p>
       </div>
       <el-card shadow="never" class="login-card">
         <template #header>
           <div class="card-header">
             <span>账号登录</span>
-            <el-tag>Mock Ready</el-tag>
+            <el-tag type="success">Real API</el-tag>
           </div>
         </template>
         <el-form label-position="top">
@@ -56,11 +56,10 @@ async function submit() {
         </el-form>
         <div class="demo-accounts">
           <p>演示账号</p>
-          <p>`admin / admin123`</p>
-          <p>`operator / operator123`</p>
+          <p>admin / admin123</p>
+          <p>operator / operator123</p>
         </div>
       </el-card>
     </div>
   </div>
 </template>
-

@@ -131,6 +131,28 @@ body {
   gap: 10px;
 }
 
+.hero-side {
+  display: grid;
+  gap: 14px;
+  justify-items: end;
+}
+
+.hero-actions,
+.quick-links,
+.detail-actions,
+.card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hero-meta,
+.inline-tip {
+  color: var(--ink-1);
+  font-size: 14px;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -148,6 +170,12 @@ body {
   font-weight: 700;
 }
 
+.stat-card-hint {
+  margin: 10px 0 0;
+  color: var(--ink-1);
+  font-size: 13px;
+}
+
 .two-column-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -157,6 +185,20 @@ body {
 .chart-box {
   width: 100%;
   height: 320px;
+}
+
+.dashboard-jump-card {
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.dashboard-jump-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 40px rgba(28, 42, 51, 0.12);
+}
+
+.dashboard-jump-card .chart-box {
+  cursor: pointer;
 }
 
 .card-header {
@@ -171,6 +213,13 @@ body {
   padding-left: 18px;
   color: var(--ink-1);
   line-height: 1.8;
+}
+
+.demo-script {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-1);
+  line-height: 1.9;
 }
 
 .notice-box {
@@ -203,6 +252,178 @@ body {
   width: 100%;
 }
 
+.task-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.saved-view-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.saved-view-name {
+  width: 280px;
+}
+
+.saved-view-select {
+  width: 260px;
+}
+
+.form-select-narrow {
+  width: 140px;
+}
+
+.form-select-medium {
+  width: 220px;
+}
+
+.form-select-wide {
+  width: 300px;
+}
+
+.form-select-xl {
+  width: 380px;
+}
+
+.form-input-medium {
+  width: 220px;
+}
+
+.form-input-wide {
+  width: 320px;
+}
+
+.filter-summary {
+  color: var(--ink-1);
+  font-size: 14px;
+}
+
+.el-table .current-row-highlight > td.el-table__cell {
+  background: rgba(31, 143, 107, 0.12) !important;
+}
+
+.el-table .current-row-highlight:hover > td.el-table__cell {
+  background: rgba(31, 143, 107, 0.18) !important;
+}
+
+.tag-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.permission-tree {
+  display: grid;
+  gap: 16px;
+}
+
+.permission-section {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.permission-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.permission-item {
+  margin-right: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.permission-hint {
+  margin-left: 8px;
+  color: var(--ink-1);
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  .permission-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.filter-range {
+  width: 280px;
+}
+
+.refresh-select {
+  width: 110px;
+}
+
+.task-sync-time {
+  font-size: 28px;
+}
+
+.event-stream {
+  display: grid;
+  gap: 16px;
+}
+
+.event-item {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.event-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.event-dot {
+  width: 12px;
+  height: 12px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-alt));
+  box-shadow: 0 0 0 6px rgba(31, 143, 107, 0.12);
+}
+
+.event-content {
+  display: grid;
+  gap: 8px;
+}
+
+.event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.event-meta,
+.event-summary {
+  margin: 0;
+  color: var(--ink-1);
+  line-height: 1.7;
+}
+
 .demo-accounts {
   margin-top: 20px;
   color: var(--ink-1);
@@ -219,6 +440,20 @@ body {
 
   .hero-panel {
     align-items: flex-start;
+  }
+
+  .form-select-narrow,
+  .form-select-medium,
+  .form-select-wide,
+  .form-select-xl,
+  .form-input-medium,
+  .form-input-wide,
+  .saved-view-select {
+    width: 100%;
+  }
+
+  .hero-side {
+    justify-items: start;
   }
 
   .sidebar {

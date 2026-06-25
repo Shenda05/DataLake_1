@@ -4,29 +4,42 @@ server:
 spring:
   application:
     name: data-lake-platform
-  datasource:
-    url: jdbc:h2:mem:datalake;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
-  h2:
-    console:
-      enabled: true
   servlet:
     multipart:
       max-file-size: 20MB
       max-request-size: 20MB
+  jackson:
+    time-zone: Asia/Shanghai
+
+  # MySQL 数据库配置（密码为空）
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/data_lake_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # 自动执行 schema.sql 建表
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+      schema-locations: classpath:schema.sql
 
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
-app:
-  jwt:
-    secret: change-me-for-production-demo-secret-2026
-    expire-seconds: 7200
-
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
 
+app:
+  jwt:
+    secret: change-me-for-production-demo-secret-2026
+    expire-seconds: 7200
+  storage:
+    root: ../storage
+  data-source:
+    duplicate-connection-strategy: WARN
+  task:
+    poll-delay-ms: 15000
